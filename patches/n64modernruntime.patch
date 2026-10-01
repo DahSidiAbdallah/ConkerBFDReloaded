@@ -1,0 +1,245 @@
+diff --git a/librecomp/CMakeLists.txt b/librecomp/CMakeLists.txt
+index 716d48b..fed5660 100644
+--- a/librecomp/CMakeLists.txt
++++ b/librecomp/CMakeLists.txt
+@@ -50,11 +50,13 @@ target_include_directories(librecomp PRIVATE
+     "${CMAKE_CURRENT_SOURCE_DIR}/include/librecomp"
+ )
+ 
+-target_compile_options(librecomp PRIVATE
+-#    -Wall
+-#    -Wextra
+-    -Wno-unused-parameter
+-)
++if (NOT MSVC)
++    target_compile_options(librecomp PRIVATE
++    #    -Wall
++    #    -Wextra
++        -Wno-unused-parameter
++    )
++endif()
+ 
+ if (WIN32)
+     add_compile_definitions(NOMINMAX)
+diff --git a/librecomp/include/librecomp/game.hpp b/librecomp/include/librecomp/game.hpp
+index a4cf7e8..8bb9ad2 100644
+--- a/librecomp/include/librecomp/game.hpp
++++ b/librecomp/include/librecomp/game.hpp
+@@ -38,6 +38,10 @@ namespace recomp {
+ 
+         void (*on_init_callback)(uint8_t* rdram, recomp_context* context) = nullptr;
+ 
++        // Optional: decides whether a ROM (big-endian) is this game's, in place of comparing
++        // its hash with rom_hash. Lets a game accept ROM hacks that leave its code alone.
++        bool (*accept_rom)(std::span<const uint8_t> rom) = nullptr;
++
+         std::u8string stored_filename() const;
+     };
+     struct Version {
+diff --git a/librecomp/src/mods.cpp b/librecomp/src/mods.cpp
+index 0f7de83..42c9057 100644
+--- a/librecomp/src/mods.cpp
++++ b/librecomp/src/mods.cpp
+@@ -149,9 +149,11 @@ private:
+ 
+ void unprotect(void* target_func, uint64_t* old_flags) {
+     DWORD old_flags_dword;
++    // Keep the page executable while it's patched: other threads may be running code on the same page (an
++    // incrementally linked executable's jump thunks share pages), and without execute access they crash.
+     BOOL result = VirtualProtect(target_func,
+         16,
+-        PAGE_READWRITE,
++        PAGE_EXECUTE_READWRITE,
+         &old_flags_dword);
+     *old_flags = old_flags_dword;
+     (void)result;
+@@ -233,7 +235,13 @@ void unprotect(void* target_func, uint64_t* old_flags) {
+     int page_size = getpagesize();
+     page_start = (page_start / page_size) * page_size;
+ 
++#if defined(__APPLE__)
++    // Apple Silicon doesn't allow pages both writable and executable.
+     int result = mprotect((void*)page_start, page_size, PROT_READ | PROT_WRITE);
++#else
++    // Keep the page executable while it's patched: other threads may be running code on it.
++    int result = mprotect((void*)page_start, page_size, PROT_READ | PROT_WRITE | PROT_EXEC);
++#endif
+     *old_flags = 0;
+     (void)result;
+ }
+diff --git a/librecomp/src/pi.cpp b/librecomp/src/pi.cpp
+index 43509ba..39b4a99 100644
+--- a/librecomp/src/pi.cpp
++++ b/librecomp/src/pi.cpp
+@@ -266,7 +266,9 @@ void ultramodern::join_saving_thread() {
+     }
+ }
+ 
+-void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, gpr rdram_address, uint32_t physical_addr, uint32_t size, uint32_t direction) {
++// `mesg` is what the transfer's completion posts to `mq`: libultra's PI manager
++// sends the request's OSIoMesg pointer, and some games (Conker) read it.
++void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, OSMesg mesg, gpr rdram_address, uint32_t physical_addr, uint32_t size, uint32_t direction) {
+     // TODO asynchronous transfer
+     // TODO implement unaligned DMA correctly
+     if (direction == 0) {
+@@ -275,7 +277,7 @@ void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, gpr rdram_address, uint32_t physical_
+             recomp::do_rom_read(rdram, rdram_address, physical_addr, size);
+ 
+             // Send a message to the mq to indicate that the transfer completed
+-            ultramodern::enqueue_external_message_src(mq, 0, false, ultramodern::EventMessageSource::Pi);
++            ultramodern::enqueue_external_message_src(mq, mesg, false, ultramodern::EventMessageSource::Pi);
+         } else if (physical_addr >= recomp::sram_base) {
+             if (!recomp::sram_allowed()) {
+                 ultramodern::error_handling::message_box("Attempted to use SRAM saving with other save type");
+@@ -285,7 +287,7 @@ void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, gpr rdram_address, uint32_t physical_
+             save_read(rdram, rdram_address, physical_addr - recomp::sram_base, size);
+ 
+             // Send a message to the mq to indicate that the transfer completed
+-            ultramodern::enqueue_external_message_src(mq, 0, false, ultramodern::EventMessageSource::Pi);
++            ultramodern::enqueue_external_message_src(mq, mesg, false, ultramodern::EventMessageSource::Pi);
+         } else {
+             fprintf(stderr, "[WARN] PI DMA read from unknown region, phys address 0x%08X\n", physical_addr);
+         }
+@@ -302,7 +304,7 @@ void do_dma(RDRAM_ARG PTR(OSMesgQueue) mq, gpr rdram_address, uint32_t physical_
+             save_write(rdram, rdram_address, physical_addr - recomp::sram_base, size);
+ 
+             // Send a message to the mq to indicate that the transfer completed
+-            ultramodern::enqueue_external_message_src(mq, 0, false, ultramodern::EventMessageSource::Pi);
++            ultramodern::enqueue_external_message_src(mq, mesg, false, ultramodern::EventMessageSource::Pi);
+         } else {
+             fprintf(stderr, "[WARN] PI DMA write to unknown region, phys address 0x%08X\n", physical_addr);
+         }
+@@ -321,7 +323,17 @@ extern "C" void osPiStartDma_recomp(RDRAM_ARG recomp_context* ctx) {
+ 
+     debug_printf("[pi] DMA from 0x%08X into 0x%08X of size 0x%08X\n", devAddr, dramAddr, size);
+ 
+-    do_dma(PASS_RDRAM mq, dramAddr, physical_addr, size, direction);
++    // Fill in the request as libultra does: games can read it back from the
++    // completion message (e.g. Conker matches finished DMAs by mb->dramAddr).
++    OSIoMesg* io = TO_PTR(OSIoMesg, ctx->r4);
++    io->hdr.type = (direction == 0) ? 11 : 12; // OS_MESG_TYPE_DMAREAD / OS_MESG_TYPE_DMAWRITE
++    io->hdr.pri = (u8)pri;
++    io->hdr.retQueue = mq;
++    io->dramAddr = dramAddr;
++    io->devAddr = ctx->r7;
++    io->size = size;
++
++    do_dma(PASS_RDRAM mq, (OSMesg)mb, dramAddr, physical_addr, size, direction);
+ 
+     ctx->r2 = 0;
+ }
+@@ -338,7 +350,7 @@ extern "C" void osEPiStartDma_recomp(RDRAM_ARG recomp_context* ctx) {
+ 
+     debug_printf("[pi] DMA from 0x%08X into 0x%08X of size 0x%08X\n", devAddr, dramAddr, size);
+ 
+-    do_dma(PASS_RDRAM mq, dramAddr, physical_addr, size, direction);
++    do_dma(PASS_RDRAM mq, (OSMesg)ctx->r5, dramAddr, physical_addr, size, direction);
+ 
+     ctx->r2 = 0;
+ }
+diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+index 850689d..6516856 100644
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -166,6 +166,14 @@ bool check_hash(const std::vector<uint8_t>& rom_data, uint64_t expected_hash) {
+     return calculated_hash == expected_hash;
+ }
+ 
++// Whether a ROM is the game's: its accept_rom if it has one, otherwise its hash.
++static bool rom_matches(const std::vector<uint8_t>& rom_data, const recomp::GameEntry& game_entry) {
++    if (game_entry.accept_rom != nullptr) {
++        return game_entry.accept_rom(rom_data);
++    }
++    return check_hash(rom_data, game_entry.rom_hash);
++}
++
+ static std::vector<uint8_t> read_file(const std::filesystem::path& path) {
+     std::vector<uint8_t> ret;
+ 
+@@ -197,7 +205,7 @@ bool write_file(const std::filesystem::path& path, const std::vector<uint8_t>& d
+ bool check_stored_rom(const recomp::GameEntry& game_entry) {
+     std::vector stored_rom_data = read_file(config_path / game_entry.stored_filename());
+ 
+-    if (!check_hash(stored_rom_data, game_entry.rom_hash)) {
++    if (!rom_matches(stored_rom_data, game_entry)) {
+         // Incorrect hash, remove the stored ROM file if it exists.
+         std::filesystem::remove(config_path / game_entry.stored_filename());
+         return false;
+@@ -229,7 +237,7 @@ bool recomp::load_stored_rom(const std::u8string& game_id) {
+     
+     std::vector<uint8_t> stored_rom_data = read_file(config_path / find_it->second.stored_filename());
+ 
+-    if (!check_hash(stored_rom_data, find_it->second.rom_hash)) {
++    if (!rom_matches(stored_rom_data, find_it->second)) {
+         // The ROM no longer has the right hash, delete it.
+         std::filesystem::remove(config_path / find_it->second.stored_filename());
+         return false;
+@@ -390,7 +398,7 @@ recomp::RomValidationError recomp::select_rom(const std::filesystem::path& rom_p
+             break;
+     }
+ 
+-    if (!check_hash(rom_data, game_entry.rom_hash)) {
++    if (!rom_matches(rom_data, game_entry)) {
+         const std::string_view name{ reinterpret_cast<const char*>(rom_data.data()) + 0x20, game_entry.internal_name.size()};
+         if (name == game_entry.internal_name) {
+             return recomp::RomValidationError::IncorrectVersion;
+diff --git a/ultramodern/CMakeLists.txt b/ultramodern/CMakeLists.txt
+index 5593172..70d4706 100644
+--- a/ultramodern/CMakeLists.txt
++++ b/ultramodern/CMakeLists.txt
+@@ -30,11 +30,13 @@ target_include_directories(ultramodern PUBLIC
+     "${PROJECT_SOURCE_DIR}/../thirdparty/sse2neon"
+ )
+ 
+-target_compile_options(ultramodern PRIVATE
+-#    -Wall
+-#    -Wextra
+-    -Wno-unused-parameter
+-)
++if (NOT MSVC)
++    target_compile_options(ultramodern PRIVATE
++    #    -Wall
++    #    -Wextra
++        -Wno-unused-parameter
++    )
++endif()
+ 
+ if (WIN32)
+     add_compile_definitions(NOMINMAX)
+diff --git a/ultramodern/include/ultramodern/ultramodern.hpp b/ultramodern/include/ultramodern/ultramodern.hpp
+index 46aea61..d04ad78 100644
+--- a/ultramodern/include/ultramodern/ultramodern.hpp
++++ b/ultramodern/include/ultramodern/ultramodern.hpp
+@@ -96,6 +96,9 @@ enum class ThreadPriority {
+ void set_native_thread_name(const std::string& name);
+ void set_native_thread_priority(ThreadPriority pri);
+ PTR(OSThread) this_thread();
++// Some games read libultra's __osRunningThread directly. When set, the address of
++// that variable in game memory is kept pointing at the running game thread.
++void set_running_thread_variable(PTR(PTR(OSThread)) address);
+ void set_entrypoint_thread();
+ bool is_entrypoint_thread();
+ bool is_game_thread();
+diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
+index 6e3ed18..75a76de 100644
+--- a/ultramodern/src/threads.cpp
++++ b/ultramodern/src/threads.cpp
+@@ -150,8 +150,18 @@ void ultramodern::set_native_thread_name(const std::string& name) {
+ void ultramodern::set_native_thread_priority(ThreadPriority pri) {}
+ #endif
+ 
++static PTR(PTR(OSThread)) running_thread_variable = NULLPTR;
++
++void ultramodern::set_running_thread_variable(PTR(PTR(OSThread)) address) {
++    running_thread_variable = address;
++}
++
+ void wait_for_resumed(RDRAM_ARG UltraThreadContext* thread_context) {
+     thread_context->running.wait();
++    // This thread is now the one running: mirror that into the game's __osRunningThread.
++    if (running_thread_variable != NULLPTR) {
++        *TO_PTR(PTR(OSThread), running_thread_variable) = thread_self;
++    }
+     // If this thread's context was replaced by another thread or deleted, destroy it again from its own context.
+     // This will trigger thread cleanup instead.
+     if (TO_PTR(OSThread, ultramodern::this_thread())->context != thread_context) {

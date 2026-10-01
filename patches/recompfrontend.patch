@@ -1,0 +1,121 @@
+diff --git a/recompinput/src/input_events.cpp b/recompinput/src/input_events.cpp
+index c76a1dc..e17c26f 100644
+--- a/recompinput/src/input_events.cpp
++++ b/recompinput/src/input_events.cpp
+@@ -238,6 +238,21 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+         // Always queue button up events to avoid missing them during binding.
+         recompui::queue_event(*event);
+         break;
++    case SDL_EventType::SDL_MOUSEBUTTONDOWN:
++        // Mouse buttons are bound with the keyboard, or in single player with the controller too
++        // (both profiles are read then; in multiplayer a controller is one player's). The click
++        // that starts binding has already gone by when scanning begins, so the next press is the
++        // one bound.
++        if (binding::is_binding()) {
++            const InputDevice device = binding::get_scanning_device();
++            if (device == InputDevice::Keyboard || (device == InputDevice::Controller && players::is_single_player_mode())) {
++                binding::set_scanned_input({ InputType::Mouse, event->button.button });
++            }
++        }
++        else {
++            queue_if_enabled(event);
++        }
++        break;
+     default:
+         queue_if_enabled(event);
+         break;
+diff --git a/recompinput/src/input_state.cpp b/recompinput/src/input_state.cpp
+index 03ed871..d6e76c9 100644
+--- a/recompinput/src/input_state.cpp
++++ b/recompinput/src/input_state.cpp
+@@ -18,6 +18,7 @@ static struct {
+     const Uint8* keys = nullptr;
+     SDL_Keymod keymod = SDL_Keymod::KMOD_NONE;
+     int numkeys = 0;
++    Uint32 mouse_buttons = 0; // SDL_BUTTON() mask, read with the keyboard's state each poll.
+     std::atomic_int32_t mouse_wheel_pos = 0;
+     std::mutex controllers_mutex;
+     std::vector<SDL_GameController*> detected_controllers{};
+@@ -34,6 +35,7 @@ static struct {
+ void recompinput::poll_inputs() {
+     InputState.keys = SDL_GetKeyboardState(&InputState.numkeys);
+     InputState.keymod = SDL_GetModState();
++    InputState.mouse_buttons = SDL_GetMouseState(nullptr, nullptr);
+     static bool first_poll = true;
+ 
+     {
+@@ -215,6 +217,11 @@ bool recompinput::should_override_keystate(SDL_Scancode key, SDL_Keymod mod) {
+     return false;
+ }
+ 
++// Mouse buttons are numbered as SDL numbers them (SDL_BUTTON_LEFT is 1).
++static bool mouse_button_state(int button) {
++    return button >= 1 && button <= 32 && (InputState.mouse_buttons & SDL_BUTTON(button)) != 0;
++}
++
+ float recompinput::get_input_analog(int controller_num, const InputField& field) {
+     switch (field.input_type) {
+     case InputType::Keyboard:
+@@ -230,8 +237,7 @@ float recompinput::get_input_analog(int controller_num, const InputField& field)
+     case InputType::ControllerAnalog:
+         return controller_axis_state(controller_num, field.input_id, true);
+     case InputType::Mouse:
+-        // TODO mouse support
+-        return 0.0f;
++        return mouse_button_state(field.input_id) ? 1.0f : 0.0f;
+     case InputType::None:
+         return false;
+     }
+@@ -261,8 +267,7 @@ bool recompinput::get_input_digital(int controller_num, const InputField& field)
+         // TODO adjustable threshold
+         return controller_axis_state(controller_num, field.input_id, true) >= recompinput::axis_digital_threshold;
+     case InputType::Mouse:
+-        // TODO mouse support
+-        return false;
++        return mouse_button_state(field.input_id);
+     case InputType::None:
+         return false;
+     }
+diff --git a/recompinput/src/input_types.cpp b/recompinput/src/input_types.cpp
+index c6786e6..7db1735 100644
+--- a/recompinput/src/input_types.cpp
++++ b/recompinput/src/input_types.cpp
+@@ -250,6 +250,29 @@ static std::string controller_axis_to_string(int axis) {
+     }
+ }
+ 
++static std::string mouse_button_to_string(int button) {
++    switch (button) {
++    case SDL_BUTTON_LEFT:
++        return PF_MOUSE_LEFT;
++    case SDL_BUTTON_MIDDLE:
++        return PF_MOUSE_MIDDLE;
++    case SDL_BUTTON_RIGHT:
++        return PF_MOUSE_RIGHT;
++    case SDL_BUTTON_X1:
++        return PF_MOUSE_4;
++    case SDL_BUTTON_X2:
++        return PF_MOUSE_5;
++    case 6:
++        return PF_MOUSE_6;
++    case 7:
++        return PF_MOUSE_7;
++    case 8:
++        return PF_MOUSE_8;
++    default:
++        return recompinput::unknown_device_input;
++    }
++}
++
+ std::string recompinput::InputField::to_string() const {
+     switch (input_type) {
+     case InputType::None:
+@@ -260,6 +283,8 @@ std::string recompinput::InputField::to_string() const {
+         return controller_axis_to_string(input_id);
+     case InputType::Keyboard:
+         return keyboard_input_to_string((SDL_Scancode)input_id);
++    case InputType::Mouse:
++        return mouse_button_to_string(input_id);
+     default:
+         return recompinput::unknown_device_input;
+     }

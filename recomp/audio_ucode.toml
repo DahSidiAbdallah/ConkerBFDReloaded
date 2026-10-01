@@ -1,0 +1,29 @@
+# RSPRecomp config for Conker's audio microcode (an ABI-style audio ucode like
+# libultra's aspMain, with Rare's commands). Paths are relative to this file; tools/prepare_game.sh runs it.
+#
+# Its text is at ROM/physical 0x291A0 (the task's ucode pointer, 0x100291A0 through
+# TLB entry 0) and its data at 0x2C960. The first 0xF70 bytes are the main code,
+# loaded at IMEM 0x1080. Overlay B (0x9C0 bytes at text offset 0xF70, probably the
+# MP3 decoder) is DMAed over the main code from IMEM 0x1238 by command 7 (0x1214);
+# it ends by jumping to 0x11C8, which reloads the main code's tail (text offset
+# 0x1B8) at 0x1238. The overlay header is in DMEM words 0-0xF of the ucode data.
+
+text_offset = 0x291A0
+text_size = 0xF70
+text_address = 0x04001080
+rom_file_path = "../conker.z64"
+output_file_path = "out/rsp/audio_ucode.cpp"
+output_function_name = "conker_audio_ucode"
+
+# The command jump table in DMEM at 0x10 (the dispatch at 0x10FC).
+extra_indirect_branch_targets = [
+    0x1AB0, 0x140C, 0x1240, 0x1D40, 0x1268, 0x1AE8, 0x129C, 0x1214,
+    0x13FC, 0x12FC, 0x13B4, 0x12D0, 0x1FA4, 0x1340, 0x16B8, 0x13EC,
+]
+
+[[overlay_slots]]
+text_address = 0x04001238
+overlays = [
+    { offset = 0x1B8, size = 0xDB8 }, # main code from 0x1238 on
+    { offset = 0xF70, size = 0x9C0 }, # overlay B
+]

@@ -1,0 +1,1270 @@
+diff --git a/src/gbi/rt64_gbi_f3dex2cbfd.cpp b/src/gbi/rt64_gbi_f3dex2cbfd.cpp
+index 3db0968..ada3267 100644
+--- a/src/gbi/rt64_gbi_f3dex2cbfd.cpp
++++ b/src/gbi/rt64_gbi_f3dex2cbfd.cpp
+@@ -16,8 +16,9 @@ namespace RT64 {
+     namespace GBI_F3DEX2CBFD {
+         // The game's G_LIGHTING is kept aside: lighting is computed into the vertex
+         // colours on the CPU (RSP::lightVerticesCBFD), so the shaders must not light
+-        // them again. Texture generation also relies on these normals, which RT64's
+-        // shaders can't see, so it's disabled for now.
++        // them again. Texture generation (reflections) relies on the same normals,
++        // which RT64's shaders can't see, so it's also computed on the CPU, into the
++        // vertices' texture coordinates (RSP::textureGenCBFD).
+         void geometryMode(State *state, DisplayList **dl) {
+             RSP *rsp = state->rsp.get();
+             const uint32_t offMask = (*dl)->p0(0, 24);
+@@ -26,6 +27,8 @@ namespace RT64 {
+             const uint32_t previous = current | (rsp->cbfd.lighting ? G_LIGHTING : 0);
+             const uint32_t requested = (previous & offMask) | onMask;
+             rsp->cbfd.lighting = (requested & G_LIGHTING) != 0;
++            rsp->cbfd.textureGen = (requested & G_TEXTURE_GEN) != 0;
++            rsp->cbfd.textureGenLinear = (requested & G_TEXTURE_GEN_LINEAR) != 0;
+             rsp->modifyGeometryMode(0, requested & ~(G_LIGHTING | G_TEXTURE_GEN | G_TEXTURE_GEN_LINEAR));
+         }
+ 
+diff --git a/src/hle/rt64_interpreter.cpp b/src/hle/rt64_interpreter.cpp
+index dccaa87..0ea98c1 100644
+--- a/src/hle/rt64_interpreter.cpp
++++ b/src/hle/rt64_interpreter.cpp
+@@ -4,6 +4,9 @@
+ 
+ #include "rt64_interpreter.h"
+ 
++#include <cstdio>
++#include <cstdlib>
++
+ #include <cassert>
+ 
+ //#define DUMP_DISPLAY_LISTS
+@@ -38,6 +41,7 @@ namespace RT64 {
+             }
+ 
+             UCode.textAddress = maskedTextAddress;
++            if (getenv("RT64_UCODE_LOG") != nullptr) { printf("[ucode] text=%08X data=%08X\n", maskedTextAddress, maskedDataAddress); FILE *f = fopen("C:/ConkerRecompWin/snaps/ucode_dump.bin", "wb"); if (f != nullptr) { fwrite(&state->RDRAM[maskedTextAddress], 1, 0x2000, f); fclose(f); } } // testing
+             UCode.dataAddress = maskedDataAddress;
+         }
+ 
+diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
+index 7de5b69..6e46ec9 100644
+--- a/src/hle/rt64_present_queue.cpp
++++ b/src/hle/rt64_present_queue.cpp
+@@ -4,6 +4,10 @@
+ 
+ #include "rt64_present_queue.h"
+ 
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++
+ #include "common/rt64_thread.h"
+ #include "rhi/rt64_render_hooks.h"
+ 
+@@ -403,6 +407,17 @@ namespace RT64 {
+                 presentTimestamp = Timer::current();
+                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
+                 presentProfiler.logAndRestart();
++                // Testing (Conker BFD: Reloaded): RT64_PRESENT_LOG=path logs each frame shown:
++                // microseconds, the frame's place among this game frame's frames, and their count.
++                static FILE *presentLog = []() -> FILE * {
++                    const char *path = getenv("RT64_PRESENT_LOG");
++                    return (path != nullptr) ? fopen(path, "w") : nullptr;
++                }();
++                if (presentLog != nullptr) {
++                    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
++                    fprintf(presentLog, "%lld %d %d\n", (long long)micros, i, framesToPresent);
++                    fflush(presentLog);
++                }
+             }
+         }
+     }
+diff --git a/src/hle/rt64_rdp.cpp b/src/hle/rt64_rdp.cpp
+index a10c11a..7e0db9b 100644
+--- a/src/hle/rt64_rdp.cpp
++++ b/src/hle/rt64_rdp.cpp
+@@ -15,6 +15,12 @@
+ #include "rt64_interpreter.h"
+ #include "rt64_state.h"
+ 
++// Conker: set by the host program in widescreen. Conker's scissors leave 2 pixels of the frame out
++// at each side, which a TV's border hid; RT64 widens the picture from the scissor's edges, so they
++// made thin black strips at the window's edges. With this set, such a scissor reaches the frame's
++// sides (the game's viewports already reach past them).
++extern "C" volatile int rt64_conker_open_scissor_border = 0;
++
+ #ifndef NDEBUG
+ //#   define ASSERT_LOAD_METHODS
+ //#   define LOG_FILLRECT_METHODS
+@@ -977,6 +983,15 @@ namespace RT64 {
+         scissorRect.uly = std::clamp(uly + extAlignment.topOffset, extAlignment.topBound, extAlignment.bottomBound);
+         scissorRect.lrx = std::clamp(movedFromOrigin(lrx + extAlignment.rightOffset, extAlignment.rightOrigin), extAlignment.leftBound, extAlignment.rightBound);
+         scissorRect.lry = std::clamp(lry + extAlignment.bottomOffset, extAlignment.topBound, extAlignment.bottomBound);
++        if (rt64_conker_open_scissor_border && (colorImage.width > 0)) {
++            const int32_t frameRight = int32_t(colorImage.width) * 4;
++            const int32_t border = 2 * 4;
++            if ((scissorRect.ulx > 0) && (scissorRect.ulx <= border) && (scissorRect.lrx < frameRight) && (scissorRect.lrx >= frameRight - border)) {
++                scissorRect.ulx = 0;
++                scissorRect.lrx = frameRight;
++            }
++        }
++
+         scissorModeStack[scissorStackSize - 1] = mode;
+         extended.scissorLeftOriginStack[scissorStackSize - 1] = extAlignment.leftOrigin;
+         extended.scissorRightOriginStack[scissorStackSize - 1] = extAlignment.rightOrigin;
+@@ -1041,6 +1056,18 @@ namespace RT64 {
+         }
+ 
+         int32_t mode = (otherMode.H & (3U << G_MDSFT_CYCLETYPE));
++
++        // Conker: the fills that clear the frame and its depth leave out the same 2 pixels at each side as
++        // the scissors (see setScissor). When those are opened, so are these: a fill that doesn't cover the
++        // whole scissor is drawn in the 4:3 area only, which left the depth at the widened sides uncleared.
++        if (rt64_conker_open_scissor_border && (colorImage.width > 0)) {
++            const int32_t frameRight = int32_t(colorImage.width) * 4;
++            const int32_t border = 2 * 4;
++            if ((ulx > 0) && (ulx <= border) && (lrx < frameRight) && (lrx >= frameRight - border - 4)) {
++                ulx = 0;
++                lrx = ((mode == G_CYC_COPY) || (mode == G_CYC_FILL)) ? (frameRight - 4) : frameRight;
++            }
++        }
+         if ((mode == G_CYC_COPY) || (mode == G_CYC_FILL)) {
+             lrx |= 3;
+             lry |= 3;
+diff --git a/src/hle/rt64_rect_neighbours.h b/src/hle/rt64_rect_neighbours.h
+new file mode 100644
+index 0000000..599e685
+--- /dev/null
++++ b/src/hle/rt64_rect_neighbours.h
+@@ -0,0 +1,92 @@
++//
++// Conker: pictures drawn as pieces side by side (the menus' buttons and titles are 32x32 pieces).
++// Filtering stops at each piece's clamped edge, which shows as a thin line through the picture
++// when drawn above the N64's resolution; each piece gets the texture of the piece drawn right
++// against its right and bottom edges (GPUTile.neighbourRight/Down, used by TextureSampler.hlsli)
++// so filtering blends across the join, as if the picture were one texture.
++//
++
++#pragma once
++
++#include <cmath>
++#include <cstring>
++#include <vector>
++
++#include "hle/rt64_workload.h"
++
++namespace RT64 {
++    inline void linkRectNeighbours(Workload &workload, uint32_t tileBegin, uint32_t tileEnd) {
++        struct Piece {
++            int32_t ulx, uly, lrx, lry;
++            uint32_t tile, order;
++            const DrawCall *call;
++        };
++
++        // Pieces of one picture are drawn with the same settings (colours, combiner, blending).
++        auto sameLook = [](const DrawCall &a, const DrawCall &b) {
++            return (memcmp(&a.colorCombiner, &b.colorCombiner, sizeof(a.colorCombiner)) == 0) && (memcmp(&a.otherMode, &b.otherMode, sizeof(a.otherMode)) == 0) &&
++                (memcmp(&a.rdpParams, &b.rdpParams, sizeof(a.rdpParams)) == 0);
++        };
++
++        auto &drawData = workload.drawData;
++        std::vector<Piece> pieces;
++        for (uint32_t f = 0; f < workload.fbPairCount; f++) {
++            const FramebufferPair &fbPair = workload.fbPairs[f];
++            for (uint32_t p = 0; p < fbPair.projectionCount; p++) {
++                const Projection &proj = fbPair.projections[p];
++                if (proj.type != Projection::Type::Rectangle) {
++                    continue;
++                }
++
++                // The pieces: drawn at their own size, from a texture (not a copy of the screen).
++                pieces.clear();
++                for (uint32_t d = 0; d < proj.gameCallCount; d++) {
++                    const DrawCall &call = proj.gameCalls[d].callDesc;
++                    if ((call.tileCount == 0) || (call.tileIndex < tileBegin) || (call.tileIndex >= tileEnd) || (call.rectDsdx <= 0) || (call.rectDtdy <= 0) || !call.identityRectScale()) {
++                        continue;
++                    }
++
++                    const uint32_t t = call.tileIndex;
++                    const interop::RDPTile &rdpTile = drawData.rdpTiles[t];
++                    const interop::GPUTile &gpuTile = drawData.gpuTiles[t];
++                    if (gpuTile.flags.fromCopy || gpuTile.flags.rawTMEM) {
++                        continue;
++                    }
++
++                    const int32_t width = int32_t(std::lround((rdpTile.lrs - rdpTile.uls) / 4.0f)) + 1;
++                    const int32_t height = int32_t(std::lround((rdpTile.lrt - rdpTile.ult) / 4.0f)) + 1;
++                    if (((call.rect.lrx - call.rect.ulx) != width * 4) || ((call.rect.lry - call.rect.uly) != height * 4)) {
++                        continue;
++                    }
++
++                    pieces.push_back({ call.rect.ulx, call.rect.uly, call.rect.lrx, call.rect.lry, t, d, &call });
++                }
++
++                // A button's normal and glowing pieces can both be drawn at the same place: the
++                // neighbour is one drawn the same way, and closest in order (a picture's pieces are
++                // drawn together).
++                for (const Piece &a : pieces) {
++                    interop::GPUTile &gpuTile = drawData.gpuTiles[a.tile];
++                    uint32_t bestRight = UINT32_MAX, bestDown = UINT32_MAX;
++                    for (const Piece &b : pieces) {
++                        const interop::GPUTile &other = drawData.gpuTiles[b.tile];
++                        if ((&a == &b) || (other.tcScale.x != gpuTile.tcScale.x) || (other.tcScale.y != gpuTile.tcScale.y)) {
++                            continue;
++                        }
++
++                        const uint32_t distance = ((a.order > b.order) ? (a.order - b.order) : (b.order - a.order)) + (sameLook(*a.call, *b.call) ? 0U : 0x10000000U);
++                        if ((b.ulx == a.lrx) && (b.uly == a.uly) && (b.lry == a.lry) && (distance < bestRight)) {
++                            bestRight = distance;
++                            gpuTile.neighbourRight = other.textureIndex;
++                        }
++
++                        if ((b.uly == a.lry) && (b.ulx == a.ulx) && (b.lrx == a.lrx) && (distance < bestDown)) {
++                            bestDown = distance;
++                            gpuTile.neighbourDown = other.textureIndex;
++                        }
++                    }
++                }
++            }
++        }
++    }
++};
+diff --git a/src/hle/rt64_rsp.cpp b/src/hle/rt64_rsp.cpp
+index 5abe718..b28136e 100644
+--- a/src/hle/rt64_rsp.cpp
++++ b/src/hle/rt64_rsp.cpp
+@@ -7,6 +7,9 @@
+ #include <algorithm>
+ #include <cassert>
+ #include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <unordered_set>
+ 
+ #include "../include/rt64_extended_gbi.h"
+ #include "common/rt64_common.h"
+@@ -17,6 +20,12 @@
+ #include "rt64_interpreter.h"
+ #include "rt64_state.h"
+ 
++// Testing: the host turns this on for the frames to record (RT64_CBFD_VTXLIGHT_LOG).
++extern "C" volatile int rt64_cbfd_log_window = 0;
++
++// Conker: smooth shading, set by the host program (its Graphics tab). See shared/rt64_cbfd_pixel_light.h.
++extern "C" volatile int rt64_conker_smooth_shading = 0;
++
+ //#define LOG_SPECIAL_MATRIX_OPERATIONS
+ 
+ namespace RT64 {
+@@ -440,8 +449,44 @@ namespace RT64 {
+         const uint32_t rdramAddress = fromSegmentedMasked(address);
+         const Vertex *dlVerts = reinterpret_cast<const Vertex *>(state->fromRDRAM(rdramAddress));
+         memcpy(&vertices[dstIndex], dlVerts, sizeof(Vertex) * vtxCount);
++        for (uint32_t i = dstIndex; i < dstIndex + vtxCount; i++) {
++            cbfdPixelVertices[i] = CBFDPixelVertex();
++        }
++
+         if (cbfd.lighting) {
+-            lightVerticesCBFD(dstIndex, vtxCount);
++            // Before the lighting, which replaces the colours (the normals without
++            // advanced lighting).
++            static const bool textureGenOff = getenv("RT64_CBFD_NO_TEXGEN") != nullptr; // testing: the old look
++            if (cbfd.textureGen && !textureGenOff) {
++                textureGenCBFD(dstIndex, vtxCount);
++            }
++
++            static const bool lightingOff = getenv("RT64_CBFD_LIGHT_OFF") != nullptr; // testing
++            if (!lightingOff) {
++                lightVerticesCBFD(dstIndex, vtxCount);
++            }
++            // Testing: RT64_CBFD_VTXLIGHT_LOG=path records each (vertex buffer, light set) pair
++            // once, the light set without the lights' strength (the torches flicker).
++            static FILE *vtxLightLog = []() -> FILE * {
++                const char *path = getenv("RT64_CBFD_VTXLIGHT_LOG");
++                return (path != nullptr) ? fopen(path, "w") : nullptr;
++            }();
++            if ((vtxLightLog != nullptr) && rt64_cbfd_log_window) {
++                static std::unordered_set<uint64_t> seenPairs;
++                const int numLights = int(std::min<uint32_t>(cbfd.lightCount, uint32_t(cbfd.lights.size() - 1)));
++                uint64_t hash = 1469598103934665603ULL;
++                auto mix = [&](float f) { uint32_t u; memcpy(&u, &f, 4); hash = (hash ^ u) * 1099511628211ULL; };
++                mix(float(numLights)); mix(float(cbfd.advancedLighting));
++                for (int l = 0; l <= numLights; l++) {
++                    const CBFDLight &cl = cbfd.lights[l];
++                    mix(cl.r); mix(cl.g); mix(cl.b); mix(std::round(cl.pos[0])); mix(std::round(cl.pos[1])); mix(std::round(cl.pos[2]));
++                }
++                const uint64_t key = (uint64_t(rdramAddress) << 32) ^ hash;
++                if (seenPairs.insert(key).second) {
++                    fprintf(vtxLightLog, "%08X %016llX %d %d\n", rdramAddress, (unsigned long long)hash, numLights, int(cbfd.advancedLighting));
++                    fflush(vtxLightLog);
++                }
++            }
+         }
+ 
+         setVertexCommon<true, sizeof(Vertex)>(rdramAddress, dstIndex, dstIndex + vtxCount);
+@@ -517,6 +562,50 @@ namespace RT64 {
+             lightDirs[l] = (len > 0.0f) ? (d3 / len) : hlslpp::float3(0.0f, 0.0f, 0.0f);
+         }
+ 
++        // Testing: RT64_CBFD_LIGHT_LOG prints each different set of lights used.
++        static const bool lightLog = getenv("RT64_CBFD_LIGHT_LOG") != nullptr;
++        if (lightLog) {
++            static std::unordered_set<uint64_t> seen;
++            char line[2048];
++            int n = snprintf(line, sizeof(line), "[lights] adv=%d point=%d count=%d mod off %.0f %.0f %.0f scale %.3f %.3f %.3f", int(cbfd.advancedLighting), int(pointLighting), numLights, mod[8], mod[9], mod[10], mod[12], mod[13], mod[14]);
++            { const hlslpp::float4x4 &vp = viewProjMatrixStack[projectionMatrixStackSize - 1]; n += snprintf(line + n, sizeof(line) - n, " vp00 %.3f vp11 %.3f vp22 %.3f vp32 %.1f", float(vp[0][0]), float(vp[1][1]), float(vp[2][2]), float(vp[3][2])); }
++            for (int l = 0; l <= numLights; l++) {
++                const CBFDLight &cl = cbfd.lights[l];
++                n += snprintf(line + n, sizeof(line) - n, " | %d: rgb %.2f %.2f %.2f dir %.2f %.2f %.2f pos %.0f %.0f %.0f ca %.2f", l, cl.r, cl.g, cl.b, cl.dir[0], cl.dir[1], cl.dir[2], cl.pos[0], cl.pos[1], cl.pos[2], cl.ca);
++            }
++            uint64_t hash = 1469598103934665603ULL;
++            for (int k = 0; k < n; k++) { hash = (hash ^ uint8_t(line[k])) * 1099511628211ULL; }
++            if (seen.insert(hash).second && seen.size() < 200000) {
++                printf("%s\n", line);
++            }
++        }
++
++        // Smooth shading: the point lights go to the pixels as a light set (the last one of the frame
++        // when it's the same), and each vertex keeps its colour, base lighting and position for them.
++        const bool pixelLighting = (rt64_conker_smooth_shading != 0);
++        uint32_t pixelLightSet = 0;
++        if (pixelLighting) {
++            interop::CBFDPixelLightSet lightSet = {};
++            for (int p = numLights - 2; (p >= 0) && (lightSet.count < CBFD_PIXEL_MAX_POINT_LIGHTS); p--) {
++                const CBFDLight &light = cbfd.lights[p];
++                interop::CBFDPixelLight &pixelLight = lightSet.lights[lightSet.count++];
++                pixelLight.posCa = { light.pos[0], light.pos[1], light.pos[2], light.ca };
++                pixelLight.col = { light.r, light.g, light.b, 0.0f };
++                const bool normalTerm = cbfd.advancedLighting && pointLighting;
++                pixelLight.dir = { float(lightDirs[p][0]), float(lightDirs[p][1]), float(lightDirs[p][2]), normalTerm ? 1.0f : 0.0f };
++            }
++
++            Workload &workload = state->ext.workloadQueue->workloads[state->ext.workloadQueue->writeCursor];
++            auto &lightSets = workload.drawData.cbfdPixelLightSets;
++            if (memcmp(&lightSets.back(), &lightSet, sizeof(lightSet)) != 0) {
++                lightSets.emplace_back(lightSet);
++            }
++
++            pixelLightSet = uint32_t(lightSets.size() - 1);
++        }
++
++        static const bool oldLightPositions = getenv("RT64_CBFD_OLD_LIGHTPOS") != nullptr; // testing: GLideN64's positions
++        const hlslpp::float4x4 modelViewProj = hlslpp::mul(modelMatrixStack[modelMatrixStackSize - 1], viewProjMatrixStack[projectionMatrixStackSize - 1]);
+         const uint8_t *rdram = state->fromRDRAM(0);
+         for (uint32_t i = dstIndex; i < dstIndex + vtxCount; i++) {
+             Vertex &vtx = vertices[i];
+@@ -524,9 +613,24 @@ namespace RT64 {
+                 continue;
+             }
+ 
+-            const float px = (vtx.x + mod[8]) * mod[12];
+-            const float py = (vtx.y + mod[9]) * mod[13];
+-            const float pz = (vtx.z + mod[10]) * mod[14];
++            // The position the lights are measured from. The microcode doesn't use the
++            // vertex's model coordinates: it takes the vertex as transformed for the screen
++            // (clip space, before the divide), then adds and scales it by the game's coordinate
++            // modifier, which undoes the projection into camera space, where the game also puts
++            // its point lights. (GLideN64 applies the modifier to the model coordinates, which
++            // only agrees near the lights, where their strength is capped anyway.)
++            float px, py, pz;
++            if (oldLightPositions) {
++                px = (vtx.x + mod[8]) * mod[12];
++                py = (vtx.y + mod[9]) * mod[13];
++                pz = (vtx.z + mod[10]) * mod[14];
++            }
++            else {
++                const hlslpp::float4 clip = hlslpp::mul(hlslpp::float4(float(vtx.x), float(vtx.y), float(vtx.z), 1.0f), modelViewProj);
++                px = (float(clip.x) + mod[8]) * mod[12];
++                py = (float(clip.y) + mod[9]) * mod[13];
++                pz = (float(clip.z) + mod[10]) * mod[14];
++            }
+ 
+             // The ambient colour follows the last light.
+             float r = cbfd.lights[numLights].r;
+@@ -535,6 +639,12 @@ namespace RT64 {
+ 
+             hlslpp::float3 normal(0.0f, 0.0f, 0.0f);
+             int l = numLights - 1;
++            static const bool basicDirectional = getenv("RT64_CBFD_BASIC_DIR") != nullptr; // testing
++            if (!cbfd.advancedLighting && basicDirectional && (l >= 0)) {
++                r += cbfd.lights[l].r;
++                g += cbfd.lights[l].g;
++                b += cbfd.lights[l].b;
++            }
+             if (cbfd.advancedLighting) {
+                 const uint32_t normalAddress = cbfd.normalBase + (i << 1);
+                 normal = hlslpp::float3(
+@@ -553,16 +663,34 @@ namespace RT64 {
+                 }
+             }
+ 
++            if (pixelLighting) {
++                CBFDPixelVertex &pixelVertex = cbfdPixelVertices[i];
++                pixelVertex.pos = { px, py, pz, float(pixelLightSet) };
++                pixelVertex.base = { r, g, b, CBFD_PIXEL_LIGHT_MARK };
++                pixelVertex.norm = { float(normal[0]), float(normal[1]), float(normal[2]), 0.0f };
++                continue; // the pixels multiply the colour by the lighting
++            }
++
+             // The others are point lights.
+             for (l = numLights - 2; l >= 0; l--) {
+                 const CBFDLight &light = cbfd.lights[l];
+                 const float vx = px - light.pos[0];
+                 const float vy = py - light.pos[1];
+                 const float vz = pz - light.pos[2];
+-                const float len = 2.0f * (vx * vx + vy * vy + vz * vz) / 65536.0f;
+-                float intensity = (len > 0.0f) ? std::min(1.0f, light.ca / len) : 1.0f;
++                static const float distScale = getenv("RT64_CBFD_DIST_SCALE") ? float(atof(getenv("RT64_CBFD_DIST_SCALE"))) : 1.0f; // testing
++                const float len = 2.0f * (vx * vx + vy * vy + vz * vz) * distScale * distScale / 65536.0f;
++                static const float pointScale = getenv("RT64_CBFD_POINT_SCALE") ? float(atof(getenv("RT64_CBFD_POINT_SCALE"))) : 1.0f; // testing
++                float intensity = (len > 0.0f) ? std::min(1.0f, pointScale * light.ca / len) : 1.0f;
++                static const bool pointToLight = getenv("RT64_CBFD_POINT_DIR") != nullptr; // testing
+                 if (cbfd.advancedLighting && pointLighting) {
+-                    intensity *= std::min(1.0f, float(hlslpp::dot(normal, lightDirs[l])));
++                    if (pointToLight) {
++                        hlslpp::float3 toLight(-vx, -vy, -vz);
++                        float toLen = hlslpp::length(toLight);
++                        intensity *= (toLen > 0.0f) ? std::min(1.0f, float(hlslpp::dot(normal, toLight / toLen))) : 1.0f;
++                    }
++                    else {
++                        intensity *= std::min(1.0f, float(hlslpp::dot(normal, lightDirs[l])));
++                    }
+                 }
+ 
+                 if (intensity > 0.0f) {
+@@ -578,6 +706,60 @@ namespace RT64 {
+         }
+     }
+ 
++    // Texture generation (environment-mapped reflections) as F3DEX2 does it, with Conker's
++    // normals: each vertex's normal against the look-at directions (in model space, like
++    // the lights above) picks the point of the reflection texture it shows. The result
++    // goes in the vertex's texture coordinates (s10.5), which the texture scale then
++    // multiplies as for any vertex. Same formula as RT64's shaders (TextureGen.hlsli).
++    void RSP::textureGenCBFD(uint32_t dstIndex, uint32_t vtxCount) {
++        const hlslpp::float4x4 &modelView = modelMatrixStack[modelMatrixStackSize - 1];
++        auto toModel = [&](const hlslpp::float3 &v) {
++            hlslpp::float3 d = hlslpp::mul(modelView, hlslpp::float4(v, 0.0f)).xyz;
++            float len = hlslpp::length(d);
++            return (len > 0.0f) ? (d / len) : hlslpp::float3(0.0f, 0.0f, 0.0f);
++        };
++
++        const hlslpp::float3 lookAtX = toModel(lookAt.x);
++        const hlslpp::float3 lookAtY = toModel(lookAt.y);
++        const uint8_t *rdram = state->fromRDRAM(0);
++        for (uint32_t i = dstIndex; i < dstIndex + vtxCount; i++) {
++            Vertex &vtx = vertices[i];
++            hlslpp::float3 normal;
++            if (cbfd.advancedLighting) {
++                const uint32_t normalAddress = cbfd.normalBase + (i << 1);
++                normal = hlslpp::float3(
++                    float(int8_t(rdram[(normalAddress + 0) ^ 3])) / 127.0f,
++                    float(int8_t(rdram[(normalAddress + 1) ^ 3])) / 127.0f,
++                    float(int8_t(vtx.flag & 0xFF)) / 127.0f);
++            }
++            else {
++                normal = hlslpp::float3(float(vtx.normal.x), float(vtx.normal.y), float(vtx.normal.z)) / 127.0f;
++            }
++
++            float u = std::clamp(float(hlslpp::dot(normal, lookAtX)), -1.0f, 1.0f);
++            float v = std::clamp(float(hlslpp::dot(normal, lookAtY)), -1.0f, 1.0f);
++            if (cbfd.textureGenLinear) {
++                u = std::acos(-u) * 325.94932f; // 1024 / PI
++                v = std::acos(-v) * 325.94932f;
++            }
++            else {
++                u = (u + 1.0f) * 512.0f;
++                v = (v + 1.0f) * 512.0f;
++            }
++
++            vtx.s = int16_t(std::clamp(u * 32.0f, -32768.0f, 32767.0f));
++            vtx.t = int16_t(std::clamp(v * 32.0f, -32768.0f, 32767.0f));
++        }
++
++        // Testing: RT64_CBFD_TEXGEN_LOG counts the vertices given reflections.
++        static const bool log = getenv("RT64_CBFD_TEXGEN_LOG") != nullptr;
++        static uint32_t logged = 0;
++        if (log && ((logged += vtxCount) >= 2000)) {
++            printf("[texgen] %u vertices\n", logged);
++            logged = 0;
++        }
++    }
++
+     void RSP::setVertexColorPD(uint32_t address) {
+         vertexColorPDAddress = fromSegmentedMasked(address);
+     }
+@@ -847,6 +1029,11 @@ namespace RT64 {
+             normColBytes.emplace_back(v.color.g);
+             normColBytes.emplace_back(v.color.b);
+             normColBytes.emplace_back(v.color.a);
++            const CBFDPixelVertex &pixelVertex = cbfdPixelVertices[i];
++            workload.drawData.cbfdPixelPos.emplace_back(pixelVertex.pos);
++            workload.drawData.cbfdPixelBase.emplace_back(pixelVertex.base);
++            workload.drawData.cbfdPixelNorm.emplace_back(pixelVertex.norm);
++            cbfdPixelVertices[i] = CBFDPixelVertex(); // other microcodes' loads don't set it
+             viewProjIndices.emplace_back(curViewProjIndex);
+             worldIndices.emplace_back(curTransformIndex);
+             fogIndices.emplace_back(curFogIndex);
+@@ -932,6 +1119,9 @@ namespace RT64 {
+             normColBytes.emplace_back(normColBytes[globalIndex * 4 + 1]);
+             normColBytes.emplace_back(normColBytes[globalIndex * 4 + 2]);
+             normColBytes.emplace_back(normColBytes[globalIndex * 4 + 3]);
++            workload.drawData.cbfdPixelPos.emplace_back(interop::float4(workload.drawData.cbfdPixelPos[globalIndex]));
++            workload.drawData.cbfdPixelBase.emplace_back(interop::float4(workload.drawData.cbfdPixelBase[globalIndex]));
++            workload.drawData.cbfdPixelNorm.emplace_back(interop::float4(workload.drawData.cbfdPixelNorm[globalIndex]));
+             tcFloats.emplace_back(tcFloats[globalIndex * 2 + 0]);
+             tcFloats.emplace_back(tcFloats[globalIndex * 2 + 1]);
+             tcVelFloats.emplace_back(tcVelFloats[globalIndex * 2 + 0]);
+diff --git a/src/hle/rt64_rsp.h b/src/hle/rt64_rsp.h
+index 313f93a..dfd13ce 100644
+--- a/src/hle/rt64_rsp.h
++++ b/src/hle/rt64_rsp.h
+@@ -177,11 +177,22 @@ namespace RT64 {
+         struct {
+             bool lighting = false;              // G_LIGHTING as the game set it.
+             bool advancedLighting = false;      // Switched on by G_LOAD_UCODE.
++            bool textureGen = false;            // G_TEXTURE_GEN as the game set it.
++            bool textureGenLinear = false;      // G_TEXTURE_GEN_LINEAR as the game set it.
+             uint32_t normalBase = 0;            // Physical address of the per-vertex normals.
+             uint32_t lightCount = 0;
+             std::array<CBFDLight, 12> lights;
+             std::array<float, 20> coordMod = {};
+         } cbfd;
++
++        // Conker: smooth shading (shared/rt64_cbfd_pixel_light.h). For each vertex in the cache,
++        // what the pixels need to light it themselves (zero when they don't).
++        struct CBFDPixelVertex {
++            interop::float4 pos = { 0.0f, 0.0f, 0.0f, 0.0f };
++            interop::float4 base = { 0.0f, 0.0f, 0.0f, 0.0f };
++            interop::float4 norm = { 0.0f, 0.0f, 0.0f, 0.0f };
++        };
++        std::array<CBFDPixelVertex, RSP_MAX_VERTICES> cbfdPixelVertices;
+         uint32_t vertexFogIndex;
+         uint32_t vertexLightIndex;
+         uint32_t vertexLightCount;
+@@ -278,6 +289,7 @@ namespace RT64 {
+         void setLightCBFD(uint32_t index, uint32_t address);
+         void setCoordModCBFD(uint32_t w0, uint32_t w1);
+         void lightVerticesCBFD(uint32_t dstIndex, uint32_t vtxCount);
++        void textureGenCBFD(uint32_t dstIndex, uint32_t vtxCount);
+         void setVertexColorPD(uint32_t address);
+         void setVertexSegmentV1(bool isEnabled, uint32_t vertexElement, uint32_t vertexAddress, uint32_t baseSegmentAddress);
+         template<uint32_t floatCount, uint32_t vertexSize>
+diff --git a/src/hle/rt64_state.cpp b/src/hle/rt64_state.cpp
+index 34210a0..1d3fc88 100644
+--- a/src/hle/rt64_state.cpp
++++ b/src/hle/rt64_state.cpp
+@@ -3,11 +3,15 @@
+ //
+ 
+ #include "rt64_state.h"
++#include "rt64_rect_neighbours.h"
+ 
+ #include "common/rt64_fblog.h"
+ 
++#include <algorithm>
+ #include <cassert>
+ #include <cinttypes>
++#include <fstream>
++#include <unordered_set>
+ 
+ #include "im3d/im3d.h"
+ #include "im3d/im3d_math.h"
+@@ -29,6 +33,9 @@
+ #define MI_INTR_DP          0x00000020
+ #define MI_INTR_SP          0x00000001
+ 
++// Conker: see State::fullSync (set by the host program).
++extern "C" volatile float rt64_conker_native_aspect_scale = 0.0f;
++
+ namespace RT64 {
+     const float ShiftScaleMap[] = {
+         1.0f,
+@@ -58,6 +65,14 @@ namespace RT64 {
+ 
+         this->RDRAM = RDRAM;
+         this->MI_INTR_REG = MI_INTR_REG;
++
++        // Conker: RT64_DUMP_TEXTURES=directory starts dumping textures (as the developer menu's button
++        // does) from the start, for making texture packs. The 2D ones are listed in rect_hashes.txt.
++        if (const char *dumpDirectory = getenv("RT64_DUMP_TEXTURES")) {
++            std::error_code ec;
++            std::filesystem::create_directories(dumpDirectory, ec);
++            dumpingTexturesDirectory = dumpDirectory;
++        }
+         this->checkInterrupts = checkInterrupts;
+ 
+         rsp = std::make_unique<RSP>(this);
+@@ -820,6 +835,28 @@ namespace RT64 {
+                     const uint32_t rdpTileLimit = gameCall.callDesc.tileIndex + gameCall.callDesc.tileCount;
+                     while (rdpTileCursor < rdpTileLimit) {
+                         uploadTile(rdpTileCursor, fbPair, gameCall.callDesc);
++                        if (!dumpingTexturesDirectory.empty() && (proj.type == Projection::Type::Rectangle)) { // Conker: the 2D ones (HUD, menus, text)
++                            static std::unordered_set<uint64_t> rectHashes;
++                            const DrawCallTile &callTile = workload.drawData.callTiles[rdpTileCursor];
++                            if (callTile.valid && !callTile.tileCopyUsed && (callTile.tmemHashOrID != 0) && rectHashes.insert(callTile.tmemHashOrID).second) {
++                                std::ofstream rectList(dumpingTexturesDirectory / "rect_hashes.txt", std::ios::app);
++                                char line[32];
++                                snprintf(line, sizeof(line), "%016" PRIx64 "\n", callTile.tmemHashOrID);
++                                rectList << line;
++                            }
++                            // Where each one is drawn (the frame, the picture it's drawn into and the rectangle, in quarter
++                            // pixels), so pictures made of several pieces can be put back together.
++                            static std::unordered_set<std::string> rectPlaces;
++                            if (callTile.valid && !callTile.tileCopyUsed && (callTile.tmemHashOrID != 0) && (rectPlaces.size() < 200000)) {
++                                const FixedRect &r = gameCall.callDesc.rect;
++                                char place[160];
++                                snprintf(place, sizeof(place), "%016" PRIx64 " %08X %u %d %d %d %d", callTile.tmemHashOrID, fbPair.colorImage.address, fbPair.colorImage.width, r.ulx, r.uly, r.lrx, r.lry);
++                                if (rectPlaces.insert(place).second) {
++                                    std::ofstream placeList(dumpingTexturesDirectory / "rect_places.txt", std::ios::app);
++                                    placeList << workload.submissionFrame << " " << place << "\n";
++                                }
++                            }
++                        }
+                         rdpTileCursor++;
+                     }
+                 }
+@@ -1006,6 +1043,7 @@ namespace RT64 {
+                     lerpDesc.enabled = true;
+                     debuggerDesc.highlightColor = 0;
+ 
++
+ #               if SCRIPT_ENABLED
+                     lerpDesc.matchCallback = nullptr;
+ #               endif
+@@ -1174,6 +1212,45 @@ namespace RT64 {
+         workload.uploadDrawData(ext.framebufferGraphicsWorker, ext.drawDataUploader);
+         workload.updateOutputBuffers(ext.framebufferGraphicsWorker);
+ 
++        // Conker: when the host asks (rt64_conker_native_aspect_scale, the widened ratio over 4:3), the
++        // native picture written to RDRAM holds the whole widened view squeezed into the N64's width:
++        // the full-width 3D views get the same wider projection as the high resolution picture, their
++        // viewports stay. The pause menu blurs the last frame from RDRAM and draws it stretched across
++        // the window (host/src/widescreen.cpp). The transforms are put back after the native render.
++        thread_local std::vector<std::pair<uint32_t, interop::float4x4>> nativeWideRestore;
++        nativeWideRestore.clear();
++        const float nativeWideScale = rt64_conker_native_aspect_scale;
++        if (renderToRDRAM && (nativeWideScale > 1.0f)) {
++            auto &drawData = workload.drawData;
++            for (uint32_t f = 0; f < workload.fbPairCount; f++) {
++                const FramebufferPair &fbPair = workload.fbPairs[f];
++                for (uint32_t p = 0; p < fbPair.projectionCount; p++) {
++                    const Projection &proj = fbPair.projections[p];
++                    if ((proj.type != Projection::Type::Perspective) || !proj.usesViewport() || proj.scissorRect.isNull()) {
++                        continue;
++                    }
++
++                    const uint32_t t = proj.transformsIndex;
++                    const auto &viewport = drawData.rspViewports[t];
++                    const int16_t *viewportClipRatios = &drawData.viewportClipRatios[t * 4];
++                    const FixedRect intersectionRect = proj.scissorRect.intersection(viewport.rect(viewportClipRatios));
++                    const FixedRect &pairScissor = fbPair.scissorRect.isNull() ? proj.scissorRect : fbPair.scissorRect;
++                    const bool coversWholeWidth = !intersectionRect.isEmpty() && (intersectionRect.ulx <= pairScissor.ulx + CoversWidthViewportSlack) && (intersectionRect.lrx >= pairScissor.lrx - CoversWidthViewportSlack);
++                    const bool horizontalRatio = !intersectionRect.isEmpty() && (intersectionRect.width(true, true) > intersectionRect.height(true, true));
++                    const bool alreadyWide = std::any_of(nativeWideRestore.begin(), nativeWideRestore.end(), [t](const auto &r) { return r.first == t; });
++                    if ((drawData.viewportOrigins[t] != G_EX_ORIGIN_NONE) || !coversWholeWidth || !horizontalRatio || alreadyWide) {
++                        continue;
++                    }
++
++                    interop::float4x4 &viewProj = drawData.viewProjTransforms[t];
++                    nativeWideRestore.emplace_back(t, viewProj);
++                    for (int i = 0; i < 4; i++) {
++                        viewProj[i][0] /= nativeWideScale;
++                    }
++                }
++            }
++        }
++
+         // Upload the transforms directly.
+         ext.transformsUploader->submit(ext.framebufferGraphicsWorker, {
+             { workload.drawData.viewProjTransforms.data(), workload.drawRanges.viewProjTransforms, sizeof(interop::float4x4), RenderBufferFlag::STORAGE, { }, &workload.drawBuffers.viewProjTransformsBuffer},
+@@ -1370,6 +1447,7 @@ namespace RT64 {
+                     gpuTileRange.second = rdpTileCursor;
+                     framebufferRenderer->createGPUTiles(&workload.drawData.callTiles[gpuTileCursor], rdpTileCursor - gpuTileCursor,
+                         &workload.drawData.gpuTiles[gpuTileCursor], &framebufferManager, ext.textureCache, workload.submissionFrame);
++                    linkRectNeighbours(workload, gpuTileCursor, rdpTileCursor);
+ 
+                     // Upload the GPU tiles.
+                     ext.tilesUploader->submit(ext.framebufferGraphicsWorker, {
+@@ -1608,6 +1686,10 @@ namespace RT64 {
+ 
+             // Render any remaining batches of framebuffers.
+             renderAndSynchronize(workload.fbPairCount);
++
++            for (const auto &r : nativeWideRestore) {
++                workload.drawData.viewProjTransforms[r.first] = r.second;
++            }
+         }
+         else {
+             // Process all tiles.
+diff --git a/src/hle/rt64_workload.cpp b/src/hle/rt64_workload.cpp
+index b4c85f5..721d222 100644
+--- a/src/hle/rt64_workload.cpp
++++ b/src/hle/rt64_workload.cpp
+@@ -89,6 +89,11 @@ namespace RT64 {
+         drawData.triPosFloats.clear();
+         drawData.triTcFloats.clear();
+         drawData.triColorFloats.clear();
++        drawData.cbfdPixelPos.clear();
++        drawData.cbfdPixelBase.clear();
++        drawData.cbfdPixelNorm.clear();
++        drawData.cbfdPixelLightSets.clear();
++        drawData.cbfdPixelLightSets.emplace_back(interop::CBFDPixelLightSet{}); // none
+         drawData.transformGroups.clear();
+         drawData.worldTransformGroups.clear();
+         drawData.viewProjTransformGroups.clear();
+@@ -146,6 +151,10 @@ namespace RT64 {
+         r.triPosFloats = { 0, 0 };
+         r.triTcFloats = { 0, 0 };
+         r.triColorFloats = { 0, 0 };
++        r.cbfdPixelPos = { 0, 0 };
++        r.cbfdPixelBase = { 0, 0 };
++        r.cbfdPixelNorm = { 0, 0 };
++        r.cbfdPixelLightSets = { 0, 0 };
+     }
+ 
+     void Workload::resetRSPOutputBuffers() {
+@@ -191,6 +200,10 @@ namespace RT64 {
+         r.triPosFloats.second = drawData.triPosFloats.size();
+         r.triTcFloats.second = drawData.triTcFloats.size();
+         r.triColorFloats.second = drawData.triColorFloats.size();
++        r.cbfdPixelPos.second = drawData.cbfdPixelPos.size();
++        r.cbfdPixelBase.second = drawData.cbfdPixelBase.size();
++        r.cbfdPixelNorm.second = drawData.cbfdPixelNorm.size();
++        r.cbfdPixelLightSets.second = drawData.cbfdPixelLightSets.size();
+     }
+     
+     void Workload::uploadDrawData(RenderWorker *worker, BufferUploader *bufferUploader) {
+@@ -218,7 +231,11 @@ namespace RT64 {
+             { drawData.rspLookAt.data(), drawRanges.rspLookAt, sizeof(interop::RSPLookAt), RenderBufferFlag::STORAGE, { }, &drawBuffers.rspLookAtBuffer },
+             { drawData.triPosFloats.data(), drawRanges.triPosFloats, sizeof(float), RenderBufferFlag::VERTEX, { }, &drawBuffers.triPosBuffer },
+             { drawData.triTcFloats.data(), drawRanges.triTcFloats, sizeof(float), RenderBufferFlag::VERTEX, { }, &drawBuffers.triTcBuffer },
+-            { drawData.triColorFloats.data(), drawRanges.triColorFloats, sizeof(float), RenderBufferFlag::VERTEX, { }, &drawBuffers.triColorBuffer }
++            { drawData.triColorFloats.data(), drawRanges.triColorFloats, sizeof(float), RenderBufferFlag::VERTEX, { }, &drawBuffers.triColorBuffer },
++            { drawData.cbfdPixelPos.data(), drawRanges.cbfdPixelPos, sizeof(interop::float4), RenderBufferFlag::VERTEX, { }, &drawBuffers.cbfdPixelPosBuffer },
++            { drawData.cbfdPixelBase.data(), drawRanges.cbfdPixelBase, sizeof(interop::float4), RenderBufferFlag::VERTEX, { }, &drawBuffers.cbfdPixelBaseBuffer },
++            { drawData.cbfdPixelNorm.data(), drawRanges.cbfdPixelNorm, sizeof(interop::float4), RenderBufferFlag::VERTEX, { }, &drawBuffers.cbfdPixelNormBuffer },
++            { drawData.cbfdPixelLightSets.data(), drawRanges.cbfdPixelLightSets, sizeof(interop::CBFDPixelLightSet), RenderBufferFlag::STORAGE, { }, &drawBuffers.cbfdPixelLightSetsBuffer }
+         });
+     }
+ 
+@@ -283,6 +300,10 @@ namespace RT64 {
+         nextDrawDataRange(r.triPosFloats);
+         nextDrawDataRange(r.triTcFloats);
+         nextDrawDataRange(r.triColorFloats);
++        nextDrawDataRange(r.cbfdPixelPos);
++        nextDrawDataRange(r.cbfdPixelBase);
++        nextDrawDataRange(r.cbfdPixelNorm);
++        nextDrawDataRange(r.cbfdPixelLightSets);
+     }
+ 
+     void Workload::begin(uint64_t submissionFrame) {
+diff --git a/src/hle/rt64_workload.h b/src/hle/rt64_workload.h
+index 8ea27d5..3f6da1e 100644
+--- a/src/hle/rt64_workload.h
++++ b/src/hle/rt64_workload.h
+@@ -5,6 +5,7 @@
+ #pragma once
+ 
+ #include "render/rt64_buffer_uploader.h"
++#include "shared/rt64_cbfd_pixel_light.h"
+ #include "shared/rt64_extra_params.h"
+ #include "shared/rt64_gpu_tile.h"
+ #include "shared/rt64_rdp_params.h"
+@@ -70,6 +71,13 @@ namespace RT64 {
+         std::vector<float> triPosFloats;
+         std::vector<float> triTcFloats;
+         std::vector<float> triColorFloats;
++        // Conker: smooth shading (shared/rt64_cbfd_pixel_light.h), for each vertex: where it's lit
++        // from and its light set (w), its base lighting (rgb, CBFD_PIXEL_LIGHT_MARK in w when it's
++        // lit per pixel) and its normal; and the light sets (the first is none).
++        std::vector<interop::float4> cbfdPixelPos;
++        std::vector<interop::float4> cbfdPixelBase;
++        std::vector<interop::float4> cbfdPixelNorm;
++        std::vector<interop::CBFDPixelLightSet> cbfdPixelLightSets;
+         std::vector<TransformGroup> transformGroups;
+         std::vector<uint32_t> worldTransformGroups;
+         std::vector<uint32_t> viewProjTransformGroups;
+@@ -131,6 +139,10 @@ namespace RT64 {
+         Range triPosFloats;
+         Range triTcFloats;
+         Range triColorFloats;
++        Range cbfdPixelPos;
++        Range cbfdPixelBase;
++        Range cbfdPixelNorm;
++        Range cbfdPixelLightSets;
+     };
+ 
+     struct DrawBuffers {
+@@ -164,6 +176,10 @@ namespace RT64 {
+         BufferPair triPosBuffer;
+         BufferPair triTcBuffer;
+         BufferPair triColorBuffer;
++        BufferPair cbfdPixelPosBuffer;
++        BufferPair cbfdPixelBaseBuffer;
++        BufferPair cbfdPixelNormBuffer;
++        BufferPair cbfdPixelLightSetsBuffer;
+     };
+ 
+     struct ComputedBuffer {
+diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
+index 3d4fca2..0f8af66 100644
+--- a/src/hle/rt64_workload_queue.cpp
++++ b/src/hle/rt64_workload_queue.cpp
+@@ -3,6 +3,7 @@
+ //
+ 
+ #include "rt64_workload_queue.h"
++#include "rt64_rect_neighbours.h"
+ 
+ #include "common/rt64_fblog.h"
+ 
+@@ -690,6 +691,7 @@ namespace RT64 {
+                 gpuTileRange.second = workload.drawData.gpuTiles.size();
+                 framebufferRenderer->createGPUTiles(workload.drawData.callTiles.data(), uint32_t(workload.drawData.gpuTiles.size()),
+                     workload.drawData.gpuTiles.data(), &fbManager, ext.textureCache, workload.submissionFrame);
++                linkRectNeighbours(workload, 0, uint32_t(workload.drawData.gpuTiles.size()));
+ 
+                 // Upload the GPU tiles.
+                 ext.workloadTilesUploader->submit(ext.workloadGraphicsWorker, {
+diff --git a/src/render/rt64_descriptor_sets.h b/src/render/rt64_descriptor_sets.h
+index 69a82ac..c98c33f 100644
+--- a/src/render/rt64_descriptor_sets.h
++++ b/src/render/rt64_descriptor_sets.h
+@@ -212,6 +212,7 @@ namespace RT64 {
+         uint32_t gFilteredDirectLight;
+         uint32_t gFilteredIndirectLight;
+         uint32_t gBlueNoise;
++        uint32_t CBFDPixelLightSets;
+ 
+         FramebufferRendererDescriptorCommonSet(const SamplerLibrary &samplerLibrary, bool raytracing, RenderDevice *device = nullptr) {
+             builder.begin();
+@@ -221,6 +222,10 @@ namespace RT64 {
+             GPUTiles = builder.addStructuredBuffer(4);
+             instanceRenderIndices = builder.addStructuredBuffer(5);
+             DynamicRenderParams = builder.addStructuredBuffer(6);
++            // Conker: smooth shading. Before the immutable samplers: plume's D3D12 descriptor sets give those
++            // a place in the view heap that its root signatures don't, so the views added after them are
++            // looked up that many places off (ray tracing's, which aren't used).
++            CBFDPixelLightSets = builder.addStructuredBuffer(68);
+             gLinearWrapWrapSampler = builder.addImmutableSampler(7, samplerLibrary.linear.wrapWrap.get());
+             gLinearWrapMirrorSampler = builder.addImmutableSampler(8, samplerLibrary.linear.wrapMirror.get());
+             gLinearWrapClampSampler = builder.addImmutableSampler(9, samplerLibrary.linear.wrapClamp.get());
+diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
+index 2046b61..30c90c5 100644
+--- a/src/render/rt64_framebuffer_renderer.cpp
++++ b/src/render/rt64_framebuffer_renderer.cpp
+@@ -229,11 +229,14 @@ namespace RT64 {
+     {
+         for (uint32_t i = 0; i < callTileCount; i++) {
+             const DrawCallTile &callTile = callTiles[i];
++            interop::GPUTile &gpuTile = dstGPUTiles[i];
++            gpuTile.neighbourRight = GPU_TILE_NO_NEIGHBOUR; // Conker: set by linkRectNeighbours (hle/rt64_rect_neighbours.h)
++            gpuTile.neighbourDown = GPU_TILE_NO_NEIGHBOUR;
++            gpuTile.neighbourPad = 0;
+             if (!callTile.valid) {
+                 continue;
+             }
+             
+-            interop::GPUTile &gpuTile = dstGPUTiles[i];
+             if (callTile.tileCopyUsed) {
+                 const auto &it = fbManager->tileCopies.find(callTile.tmemHashOrID);
+                 if (it != fbManager->tileCopies.end()) {
+@@ -378,6 +381,7 @@ namespace RT64 {
+         descCommonSet->setBuffer(descCommonSet->RDPTiles, drawBuffers->rdpTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::RDPTile)));
+         descCommonSet->setBuffer(descCommonSet->GPUTiles, drawBuffers->gpuTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::GPUTile)));
+         descCommonSet->setBuffer(descCommonSet->DynamicRenderParams, drawBuffers->renderParamsBuffer.get(), RenderBufferStructuredView(sizeof(interop::RenderParams)));
++        descCommonSet->setBuffer(descCommonSet->CBFDPixelLightSets, drawBuffers->cbfdPixelLightSetsBuffer.get(), RenderBufferStructuredView(sizeof(interop::CBFDPixelLightSet)));
+ 
+         // Make sure the versions vector matches the texture cache size.
+         descriptorTextureVersions.resize(textureCacheSize, 0);
+@@ -1390,6 +1394,17 @@ namespace RT64 {
+         rawVertexViews[0] = RenderVertexBufferView(RenderBufferReference(triPosRes), PosStride * rawTriVertexCount);
+         rawVertexViews[1] = RenderVertexBufferView(RenderBufferReference(triTcRes), TcStride * rawTriVertexCount);
+         rawVertexViews[2] = RenderVertexBufferView(RenderBufferReference(triColRes), ColStride * rawTriVertexCount);
++
++        // Conker: smooth shading. Each vertex's lighting data; rects and raw triangles don't have any
++        // and get their positions instead, whose w is never the mark the pixels look for.
++        const uint32_t PixelLightStride = sizeof(float) * 4;
++        for (uint32_t s = 3; s < 6; s++) {
++            vertexInputSlots[s] = RenderInputSlot(s, PixelLightStride);
++            rawVertexViews[s] = RenderVertexBufferView(RenderBufferReference(triPosRes), PosStride * rawTriVertexCount);
++        }
++        indexedVertexViews[3] = RenderVertexBufferView(RenderBufferReference(drawBuffers.cbfdPixelPosBuffer.get()), PixelLightStride * vertexCount);
++        indexedVertexViews[4] = RenderVertexBufferView(RenderBufferReference(drawBuffers.cbfdPixelBaseBuffer.get()), PixelLightStride * vertexCount);
++        indexedVertexViews[5] = RenderVertexBufferView(RenderBufferReference(drawBuffers.cbfdPixelNormBuffer.get()), PixelLightStride * vertexCount);
+         testZIndexBuffer = outputBuffers.testZIndexBuffer.buffer.get();
+         testZIndexBufferView = RenderIndexBufferView(testZIndexBuffer, uint32_t(outputBuffers.testZIndexBuffer.allocatedSize), RenderFormat::R32_UINT);
+ 
+diff --git a/src/render/rt64_framebuffer_renderer.h b/src/render/rt64_framebuffer_renderer.h
+index 3add9c3..eb1bc39 100644
+--- a/src/render/rt64_framebuffer_renderer.h
++++ b/src/render/rt64_framebuffer_renderer.h
+@@ -73,9 +73,10 @@ namespace RT64 {
+         std::vector<RenderTextureBarrier> dynamicTextureBarrierVector;
+         std::unique_ptr<BufferUploader> shaderUploader;
+         std::vector<RSPSmoothNormalGenerationCB> rspSmoothNormalVector;
+-        std::array<RenderInputSlot, 3> vertexInputSlots;
+-        std::array<RenderVertexBufferView, 3> indexedVertexViews;
+-        std::array<RenderVertexBufferView, 3> rawVertexViews;
++        // The last three: Conker's smooth shading (shared/rt64_cbfd_pixel_light.h).
++        std::array<RenderInputSlot, 6> vertexInputSlots;
++        std::array<RenderVertexBufferView, 6> indexedVertexViews;
++        std::array<RenderVertexBufferView, 6> rawVertexViews;
+         RenderIndexBufferView indexBufferView;
+         RenderBuffer *testZIndexBuffer = nullptr;
+         RenderIndexBufferView testZIndexBufferView;
+diff --git a/src/render/rt64_raster_shader.cpp b/src/render/rt64_raster_shader.cpp
+index 721a01e..92ba9b6 100644
+--- a/src/render/rt64_raster_shader.cpp
++++ b/src/render/rt64_raster_shader.cpp
+@@ -53,16 +53,25 @@ namespace RT64 {
+     static const RenderFormat RasterTexcoordFormat = RenderFormat::R32G32_FLOAT;
+     static const RenderFormat RasterColorFormat = RenderFormat::R32G32B32A32_FLOAT;
+ 
+-    static const RenderInputSlot RasterInputSlots[3] = {
++    // Conker: smooth shading's lighting data (shared/rt64_cbfd_pixel_light.h).
++    static const RenderFormat RasterPixelLightFormat = RenderFormat::R32G32B32A32_FLOAT;
++
++    static const RenderInputSlot RasterInputSlots[6] = {
+         RenderInputSlot(0, RenderFormatSize(RasterPositionFormat)),
+         RenderInputSlot(1, RenderFormatSize(RasterTexcoordFormat)),
+-        RenderInputSlot(2, RenderFormatSize(RasterColorFormat))
++        RenderInputSlot(2, RenderFormatSize(RasterColorFormat)),
++        RenderInputSlot(3, RenderFormatSize(RasterPixelLightFormat)),
++        RenderInputSlot(4, RenderFormatSize(RasterPixelLightFormat)),
++        RenderInputSlot(5, RenderFormatSize(RasterPixelLightFormat))
+     };
+ 
+-    static const RenderInputElement RasterInputElements[3] = {
++    static const RenderInputElement RasterInputElements[6] = {
+         RenderInputElement("POSITION", 0, 0, RasterPositionFormat, 0, 0),
+         RenderInputElement("TEXCOORD", 0, 1, RasterTexcoordFormat, 1, 0),
+-        RenderInputElement("COLOR", 0, 2, RasterColorFormat, 2, 0)
++        RenderInputElement("COLOR", 0, 2, RasterColorFormat, 2, 0),
++        RenderInputElement("TEXCOORD", 1, 3, RasterPixelLightFormat, 3, 0),
++        RenderInputElement("TEXCOORD", 2, 4, RasterPixelLightFormat, 4, 0),
++        RenderInputElement("TEXCOORD", 3, 5, RasterPixelLightFormat, 5, 0)
+     };
+ 
+     // OptimizerCacheSPIRV
+@@ -249,25 +258,31 @@ namespace RT64 {
+         vss << std::string_view(RenderParamsText, sizeof(RenderParamsText));
+         vss << "RenderParams getRenderParams() {" + renderParamsCode + "; return rp; }";
+         vss <<
+-            "void RasterVS(const RenderParams, in float4, in float2, in float4, out float4, out float2, out float4, out float4);"
++            "void RasterVS(const RenderParams, in float4, in float2, in float4, in float4, in float4, in float4, out float4, out float2, out float4, out float4, out float4, out float4, out float4, out float2);"
+             "[shader(\"vertex\")]"
+             "void VSMain("
+             "   in float4 iPosition : POSITION,"
+             "   in float2 iUV : TEXCOORD,"
+             "   in float4 iColor : COLOR,"
++            "   in float4 iLightPos : TEXCOORD1,"
++            "   in float4 iLightBase : TEXCOORD2,"
++            "   in float4 iLightNorm : TEXCOORD3,"
+             "   out float4 oPosition : SV_POSITION,"
+             "   out float2 oUV : TEXCOORD,"
+             "   out float4 oSmoothColor : COLOR0";
+ 
+         if (!desc.flags.smoothShade) {
+-            vss << ", out float4 oFlatColor : COLOR1) {";
++            vss << ", out float4 oFlatColor : COLOR1";
+         }
+-        else {
+-            vss << ") { float4 oFlatColor;";
++
++        // Conker: smooth shading's lighting data (shared/rt64_cbfd_pixel_light.h).
++        vss << ", out float4 oLightPos : TEXCOORD1, out float4 oLightBase : TEXCOORD2, out float4 oLightNorm : TEXCOORD3, nointerpolation out float2 oLightInfo : TEXCOORD4) {";
++        if (desc.flags.smoothShade) {
++            vss << " float4 oFlatColor;";
+         }
+ 
+         vss <<
+-            "   RasterVS(getRenderParams(), iPosition, iUV, iColor, oPosition, oUV, oSmoothColor, oFlatColor);"
++            "   RasterVS(getRenderParams(), iPosition, iUV, iColor, iLightPos, iLightBase, iLightNorm, oPosition, oUV, oSmoothColor, oFlatColor, oLightPos, oLightBase, oLightNorm, oLightInfo);"
+             "}";
+ 
+         // Generate pixel shader.
+@@ -275,7 +290,7 @@ namespace RT64 {
+         pss << std::string_view(RenderParamsText, sizeof(RenderParamsText));
+         pss << "RenderParams getRenderParams() {" + renderParamsCode + "; return rp; }";
+         pss <<
+-            "bool RasterPS(const RenderParams, float4, float2, float4, float4, bool, out float4, out float4);"
++            "bool RasterPS(const RenderParams, float4, float2, float4, float4, float4, float4, float4, float2, bool, out float4, out float4);"
+             "[shader(\"pixel\")]"
+             "void PSMain("
+             "  in float4 vertexPosition : SV_POSITION"
+@@ -286,6 +301,8 @@ namespace RT64 {
+             pss << ", nointerpolation in float4 vertexFlatColor : COLOR1";
+         }
+ 
++        pss << ", in float4 lightPos : TEXCOORD1, in float4 lightBase : TEXCOORD2, in float4 lightNorm : TEXCOORD3, nointerpolation in float2 lightInfo : TEXCOORD4";
++
+         pss <<
+             ", out float4 pixelColor : SV_TARGET0"
+             ", out float4 pixelAlpha : SV_TARGET1"
+@@ -298,7 +315,7 @@ namespace RT64 {
+         pss <<
+             "   float4 resultColor;"
+             "   float4 resultAlpha;"
+-            "   if (!RasterPS(getRenderParams(), vertexPosition, vertexUV, vertexSmoothColor, vertexFlatColor, false, resultColor, resultAlpha)) discard;"
++            "   if (!RasterPS(getRenderParams(), vertexPosition, vertexUV, vertexSmoothColor, vertexFlatColor, lightPos, lightBase, lightNorm, lightInfo, false, resultColor, resultAlpha)) discard;"
+             "   pixelColor = resultColor;"
+             "   pixelAlpha = resultAlpha;"
+             "}";
+diff --git a/src/shaders/FbRendererCommon.hlsli b/src/shaders/FbRendererCommon.hlsli
+index bc250a2..8452867 100644
+--- a/src/shaders/FbRendererCommon.hlsli
++++ b/src/shaders/FbRendererCommon.hlsli
+@@ -4,6 +4,7 @@
+ 
+ #pragma once
+ 
++#include "shared/rt64_cbfd_pixel_light.h"
+ #include "shared/rt64_fb_common.h"
+ #include "shared/rt64_frame_params.h"
+ #include "shared/rt64_framebuffer_params.h"
+@@ -38,6 +39,7 @@ SamplerState gNearestMirrorClampSampler : register(s21, space0);
+ SamplerState gNearestClampWrapSampler : register(s22, space0);
+ SamplerState gNearestClampMirrorSampler : register(s23, space0);
+ SamplerState gNearestClampClampSampler : register(s24, space0);
++StructuredBuffer<CBFDPixelLightSet> CBFDPixelLightSets : register(t68, space0); // Conker: smooth shading
+ 
+ // Set 1 - RGBA32 texture cache.
+ Texture2D<float4> gTextures[8192] : register(t0, space1);
+diff --git a/src/shaders/RasterPS.hlsl b/src/shaders/RasterPS.hlsl
+index e7895c3..0d02b2e 100644
+--- a/src/shaders/RasterPS.hlsl
++++ b/src/shaders/RasterPS.hlsl
+@@ -46,7 +46,7 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
+ #endif
+ 
+ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float2 vertexUV, float4 vertexSmoothColor, float4 vertexFlatColor,
+-    bool isFrontFace, out float4 resultColor, out float4 resultAlpha) 
++    float4 lightPos, float4 lightBase, float4 lightNorm, float2 lightInfo, bool isFrontFace, out float4 resultColor, out float4 resultAlpha) 
+ {
+     const OtherMode otherMode = { rp.omL, rp.omH };
+ #if defined(DYNAMIC_RENDER_PARAMS)
+@@ -56,7 +56,14 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+ #endif
+     
+     const uint instanceIndex = instanceRenderIndices[gConstants.renderIndex].instanceIndex;
+-    const float4 vertexColor = renderFlagSmoothShade(rp.flags) ? vertexSmoothColor : float4(vertexFlatColor.rgb, vertexSmoothColor.a);
++    float4 vertexColor = renderFlagSmoothShade(rp.flags) ? vertexSmoothColor : float4(vertexFlatColor.rgb, vertexSmoothColor.a);
++
++    // Conker: smooth shading. Vertices lit per pixel carry their colour unlit, and the lighting at this
++    // pixel multiplies it (shared/rt64_cbfd_pixel_light.h).
++    if (abs(lightInfo.y - CBFD_PIXEL_LIGHT_MARK) < 0.5f) {
++        const uint lightSetIndex = (uint)(lightInfo.x + 0.5f);
++        vertexColor.rgb *= cbfdPixelLightFactor(CBFDPixelLightSets[lightSetIndex], lightPos.xyz, lightNorm.xyz, lightBase.rgb);
++    }
+     const ColorCombiner colorCombiner = { rp.ccL, rp.ccH };
+     const bool depthClampNear = renderFlagNoN(rp.flags);
+     const bool depthDecal = (otherMode.zMode() == ZMODE_DEC);
+@@ -287,6 +294,10 @@ void PSMain(
+ #if defined(DYNAMIC_RENDER_PARAMS) || defined(VERTEX_FLAT_COLOR)
+     , nointerpolation in float4 vertexFlatColor : COLOR1
+ #endif
++    , in float4 lightPos : TEXCOORD1
++    , in float4 lightBase : TEXCOORD2
++    , in float4 lightNorm : TEXCOORD3
++    , nointerpolation in float2 lightInfo : TEXCOORD4
+ #if defined(DYNAMIC_RENDER_PARAMS)
+     , bool isFrontFace : SV_IsFrontFace
+ #endif
+@@ -303,7 +314,7 @@ void PSMain(
+     float4 resultColor;
+     float4 resultAlpha;
+     float resultDepth;
+-    if (!RasterPS(getRenderParams(), vertexPosition, vertexUV, vertexSmoothColor, vertexFlatColor, isFrontFace, resultColor, resultAlpha)) {
++    if (!RasterPS(getRenderParams(), vertexPosition, vertexUV, vertexSmoothColor, vertexFlatColor, lightPos, lightBase, lightNorm, lightInfo, isFrontFace, resultColor, resultAlpha)) {
+         discard;
+     }
+ 
+diff --git a/src/shaders/RasterVS.hlsl b/src/shaders/RasterVS.hlsl
+index 74b1fa0..2680e3d 100644
+--- a/src/shaders/RasterVS.hlsl
++++ b/src/shaders/RasterVS.hlsl
+@@ -11,7 +11,10 @@
+ 
+ [[vk::push_constant]] ConstantBuffer<RasterParams> gConstants : register(b0, space0);
+ 
+-LIBRARY_EXPORT void RasterVS(const RenderParams rp, in float4 iPosition, in float2 iUV, in float4 iColor, out float4 oPosition, out float2 oUV, out float4 oSmoothColor, out float4 oFlatColor) {
++// Conker: iLightPos, iLightBase and iLightNorm are smooth shading's lighting data (shared/rt64_cbfd_pixel_light.h),
++// passed on to the pixels; oLightInfo is the light set and the mark, the same across the triangle.
++LIBRARY_EXPORT void RasterVS(const RenderParams rp, in float4 iPosition, in float2 iUV, in float4 iColor, in float4 iLightPos, in float4 iLightBase, in float4 iLightNorm,
++    out float4 oPosition, out float2 oUV, out float4 oSmoothColor, out float4 oFlatColor, out float4 oLightPos, out float4 oLightBase, out float4 oLightNorm, out float2 oLightInfo) {
+     float4 ndcPos = iPosition;
+     
+     // Skip any sort of transformation on the coordinates when rendering rects.
+@@ -37,6 +40,10 @@ LIBRARY_EXPORT void RasterVS(const RenderParams rp, in float4 iPosition, in floa
+     oUV = iUV;
+     oSmoothColor = iColor;
+     oFlatColor = iColor;
++    oLightPos = iLightPos;
++    oLightBase = iLightBase;
++    oLightNorm = iLightNorm;
++    oLightInfo = float2(iLightPos.w, iLightBase.w);
+ }
+ 
+ #if defined(DYNAMIC_RENDER_PARAMS)
+@@ -53,17 +60,24 @@ void VSMain(
+     in float4 iPosition : POSITION
+     , in float2 iUV : TEXCOORD
+     , in float4 iColor : COLOR
++    , in float4 iLightPos : TEXCOORD1
++    , in float4 iLightBase : TEXCOORD2
++    , in float4 iLightNorm : TEXCOORD3
+     , out float4 oPosition : SV_POSITION
+     , out float2 oUV : TEXCOORD
+     , out float4 oSmoothColor : COLOR0
+ #if defined(DYNAMIC_RENDER_PARAMS) || defined(VERTEX_FLAT_COLOR)
+     , out float4 oFlatColor : COLOR1
+ #endif
++    , out float4 oLightPos : TEXCOORD1
++    , out float4 oLightBase : TEXCOORD2
++    , out float4 oLightNorm : TEXCOORD3
++    , nointerpolation out float2 oLightInfo : TEXCOORD4
+ )
+ {
+ #if !defined(DYNAMIC_RENDER_PARAMS) && !defined(VERTEX_FLAT_COLOR)
+     float4 oFlatColor;
+ #endif
+-    RasterVS(getRenderParams(), iPosition, iUV, iColor, oPosition, oUV, oSmoothColor, oFlatColor);
++    RasterVS(getRenderParams(), iPosition, iUV, iColor, iLightPos, iLightBase, iLightNorm, oPosition, oUV, oSmoothColor, oFlatColor, oLightPos, oLightBase, oLightNorm, oLightInfo);
+ }
+ #endif
+\ No newline at end of file
+diff --git a/src/shaders/TextureSampler.hlsli b/src/shaders/TextureSampler.hlsli
+index 1ceb2ce..3f72d7b 100644
+--- a/src/shaders/TextureSampler.hlsli
++++ b/src/shaders/TextureSampler.hlsli
+@@ -111,6 +111,21 @@ float4 clampWrapMirrorSample(const RDPTile rdpTile, const GPUTile gpuTile, float
+ 
+ static const float LowPrecision = 128.0f;
+ 
++// Conker: a filtering sample past the right or bottom edge of a clamped piece reads the piece drawn
++// next to it there (GPUTile.neighbourRight/Down), so pictures drawn as pieces blend across the joins.
++void neighbourSample(const RDPTile rdpTile, const GPUTile gpuTile, float2 tcScale, int2 texelInt, uint mipLevel, inout float4 sample) {
++    const int maxX = (round(tcScale.x * rdpTile.lrs) / 4) - (round(tcScale.x * rdpTile.uls) / 4) + round(tcScale.x - 1.0f);
++    const int maxY = (round(tcScale.y * rdpTile.lrt) / 4) - (round(tcScale.y * rdpTile.ult) / 4) + round(tcScale.y - 1.0f);
++    if ((gpuTile.neighbourRight != GPU_TILE_NO_NEIGHBOUR) && (rdpTile.cms & G_TX_CLAMP) && (texelInt.x > maxX)) {
++        int2 t = int2(texelInt.x - maxX - 1, clamp(texelInt.y, 0, maxY));
++        sample = gTextures[NonUniformResourceIndex(gpuTile.neighbourRight)].Load(int3(t, mipLevel));
++    }
++    else if ((gpuTile.neighbourDown != GPU_TILE_NO_NEIGHBOUR) && (rdpTile.cmt & G_TX_CLAMP) && (texelInt.y > maxY)) {
++        int2 t = int2(clamp(texelInt.x, 0, maxX), texelInt.y - maxY - 1);
++        sample = gTextures[NonUniformResourceIndex(gpuTile.neighbourDown)].Load(int3(t, mipLevel));
++    }
++}
++
+ float4 sampleTextureNative(Texture2D texture, uint nativeSampler, int2 texelBaseInt, float2 textureSize) {
+     // Transform to native coordinate. Half pixel offset is required to reach the desired texel.
+     float2 nativeUVCoord = (float2(texelBaseInt) + 0.5f) / textureSize;
+@@ -186,6 +201,12 @@ float4 sampleTextureLevel(const RDPTile rdpTile, const GPUTile gpuTile, bool fil
+ #endif
+     }
+     
++    if (filtering && !gpuTileUsesTMEM && ((gpuTile.neighbourRight != GPU_TILE_NO_NEIGHBOUR) || (gpuTile.neighbourDown != GPU_TILE_NO_NEIGHBOUR))) {
++        neighbourSample(rdpTile, gpuTile, tcScale, texelBaseInt + int2(0, 1), mipLevel, samples[1]);
++        neighbourSample(rdpTile, gpuTile, tcScale, texelBaseInt + int2(1, 0), mipLevel, samples[2]);
++        neighbourSample(rdpTile, gpuTile, tcScale, texelBaseInt + int2(1, 1), mipLevel, samples[3]);
++    }
++
+     float4 sample00 = samples[0];
+     if (filtering) {
+         float2 fracPart = uvCoord - texelBaseInt;
+diff --git a/src/shared/rt64_cbfd_pixel_light.h b/src/shared/rt64_cbfd_pixel_light.h
+new file mode 100644
+index 0000000..b5b9abb
+--- /dev/null
++++ b/src/shared/rt64_cbfd_pixel_light.h
+@@ -0,0 +1,62 @@
++//
++// RT64
++//
++
++#pragma once
++
++#include "shared/rt64_hlsl.h"
++
++// Conker: smooth shading. Conker's microcode (F3DEX2CBFD) lights each vertex from the game's
++// point lights; RT64 does that on the CPU (RSP::lightVerticesCBFD). With smooth shading, the
++// point lights are worked out for each pixel instead, from the position the vertices are lit
++// from (interpolated across the triangle), with the same formula: soft, round pools of light
++// instead of the vertices' blotches.
++#define CBFD_PIXEL_MAX_POINT_LIGHTS 10
++// Marks the vertices lit per pixel (in their base's w), so that rects and other draws that don't
++// carry the lighting data never are.
++#define CBFD_PIXEL_LIGHT_MARK 12345.0f
++
++#ifdef HLSL_CPU
++namespace interop {
++#endif
++    struct CBFDPixelLight {
++        float4 posCa;  // position in the lighting space (xyz) and strength (w)
++        float4 col;    // colour (rgb)
++        float4 dir;    // direction in model space (xyz), and 1 in w when the normal's term applies
++    };
++
++    struct CBFDPixelLightSet {
++        uint count;
++        uint pad0;
++        uint pad1;
++        uint pad2;
++        CBFDPixelLight lights[CBFD_PIXEL_MAX_POINT_LIGHTS];
++    };
++
++#ifndef HLSL_CPU
++    // The lighting factor at a pixel: its base (ambient and directional light, interpolated) and
++    // each point light, capped at 1, as RSP::lightVerticesCBFD does for a vertex.
++    float3 cbfdPixelLightFactor(const CBFDPixelLightSet lightSet, float3 pos, float3 normal, float3 base) {
++        float3 factor = base;
++        const float normalLength = length(normal);
++        const float3 unitNormal = (normalLength > 0.0f) ? (normal / normalLength) : normal;
++        for (uint l = 0; l < min(lightSet.count, (uint)(CBFD_PIXEL_MAX_POINT_LIGHTS)); l++) {
++            const CBFDPixelLight light = lightSet.lights[l];
++            const float3 v = pos - light.posCa.xyz;
++            const float len = 2.0f * dot(v, v) / 65536.0f;
++            float intensity = (len > 0.0f) ? min(1.0f, light.posCa.w / len) : 1.0f;
++            if (light.dir.w > 0.5f) {
++                intensity *= min(1.0f, dot(unitNormal, light.dir.xyz));
++            }
++
++            if (intensity > 0.0f) {
++                factor += light.col.rgb * intensity;
++            }
++        }
++
++        return min(factor, 1.0f);
++    }
++#endif
++#ifdef HLSL_CPU
++};
++#endif
+diff --git a/src/shared/rt64_gpu_tile.h b/src/shared/rt64_gpu_tile.h
+index 4548f15..4629a38 100644
+--- a/src/shared/rt64_gpu_tile.h
++++ b/src/shared/rt64_gpu_tile.h
+@@ -6,6 +6,8 @@
+ 
+ #include "shared/rt64_hlsl.h"
+ 
++#define GPU_TILE_NO_NEIGHBOUR 0xFFFFFFFFU
++
+ #ifdef HLSL_CPU
+ namespace interop {
+ #endif
+@@ -58,6 +60,13 @@ namespace interop {
+         uint textureIndex;
+         float3 textureDimensions;
+         GPUTileFlags flags;
++
++        // Conker: the texture of the piece drawn right after this one on the right and below
++        // (pictures drawn as pieces side by side), so filtering at those edges blends into it
++        // instead of stopping in a line. GPU_TILE_NO_NEIGHBOUR when there's none.
++        uint neighbourRight;
++        uint neighbourDown;
++        uint neighbourPad;
+     };
+ #ifdef HLSL_CPU
+ };

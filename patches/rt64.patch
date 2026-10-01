@@ -1,0 +1,1482 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 79dfc38..aef4a58 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -327,6 +327,7 @@ set (SOURCES
+     "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3d.cpp"
+     "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dex.cpp"
+     "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dex2.cpp"
++    "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dex2cbfd.cpp"
+     "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dgolden.cpp"
+     "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dpd.cpp"
+     "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dwave.cpp"
+diff --git a/include/rt64_extended_gbi.h b/include/rt64_extended_gbi.h
+index d387090..75ab87d 100644
+--- a/include/rt64_extended_gbi.h
++++ b/include/rt64_extended_gbi.h
+@@ -113,6 +113,9 @@
+ #define G_EX_ASPECT_AUTO            0x0
+ #define G_EX_ASPECT_STRETCH         0x1
+ #define G_EX_ASPECT_ADJUST          0x2
++// Stretched to the width like G_EX_ASPECT_STRETCH, and scaled as much vertically about the
++// middle of the scissor, keeping the rect's proportions (its top and bottom are cropped).
++#define G_EX_ASPECT_ZOOM            0x3
+ 
+ #define G_EX_VERTEX_POSITION        0x0
+ #define G_EX_VERTEX_VELOCITY        0x1
+diff --git a/src/common/rt64_common.h b/src/common/rt64_common.h
+index f79adbf..6e0a6f9 100644
+--- a/src/common/rt64_common.h
++++ b/src/common/rt64_common.h
+@@ -70,6 +70,18 @@ namespace RT64 {
+         int x, y, w, h;
+     };
+ 
++    // How far (10.2 fixed point) a projection's scissor may fall short of its framebuffer pair's scissor on each
++    // side and still count as covering the whole width, for the widescreen viewport and projection adjustment.
++    // Conker's 3D scissor stops 2 pixels short of each edge of the frame, and a full-frame rectangle drawn in the
++    // same pair would otherwise put its 3D back in the 4:3 area.
++    constexpr int32_t CoversWidthSlack = 4 * 4;
++
++    // The same for a 3D view's viewport, which may fall further short: Conker's split-screen multiplayer draws each
++    // player's view 32 pixels in from each edge, and the top view shares its pair with full-frame drawing, so with
++    // the rects' slack only the bottom view was widened. Rects keep the smaller slack, so 2D a little inside the
++    // frame isn't stretched to the widened edges.
++    constexpr int32_t CoversWidthViewportSlack = 40 * 4;
++
+     struct FixedRect {
+         int32_t ulx;
+         int32_t uly;
+diff --git a/src/common/rt64_fblog.h b/src/common/rt64_fblog.h
+new file mode 100644
+index 0000000..c9dd621
+--- /dev/null
++++ b/src/common/rt64_fblog.h
+@@ -0,0 +1,80 @@
++//
++// RT64
++//
++
++// TEMP-DEBUG (Conker): a log of what happens to framebuffers, depth and widening, for the
++// widescreen door clipping. Off unless CONKER_RT64_FBLOG is set. It then logs 2 frames out of
++// every 150 (about every 5 seconds), 40 times, to rt64_fb_log.txt in the working directory.
++// Frames are workload submission frames: the same number on the game's side (hle) and on the
++// renderer's side, which run on different threads.
++
++#pragma once
++
++#include <cstdarg>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <mutex>
++
++namespace RT64 {
++    namespace FbLog {
++        constexpr uint64_t Period = 150;
++        constexpr uint64_t FramesPerCapture = 2;
++        constexpr uint64_t Captures = 40;
++
++        inline bool enabled() {
++            static const bool on = (std::getenv("CONKER_RT64_FBLOG") != nullptr);
++            return on;
++        }
++
++        inline bool frameLogged(uint64_t frame) {
++            return enabled() && ((frame % Period) < FramesPerCapture) && ((frame / Period) < Captures);
++        }
++
++        // The frame being processed on this thread, for code that doesn't know its workload.
++        inline uint64_t &threadFrame() {
++            thread_local uint64_t frame = UINT64_MAX;
++            return frame;
++        }
++
++        // Which side this thread is: "hle" (the game's display lists, and the native render to
++        // RDRAM) or "hires" (the widened picture on screen).
++        inline const char *&threadSide() {
++            thread_local const char *side = "?";
++            return side;
++        }
++
++        inline void setThreadFrame(uint64_t frame, const char *side = nullptr) {
++            threadFrame() = frame;
++            if (side != nullptr) {
++                threadSide() = side;
++            }
++        }
++
++        inline bool threadActive() {
++            return (threadFrame() != UINT64_MAX) && frameLogged(threadFrame());
++        }
++
++        inline void print(const char *fmt, ...) {
++            static std::mutex mutex;
++            static FILE *file = nullptr;
++            std::lock_guard<std::mutex> lock(mutex);
++            if (file == nullptr) {
++                file = std::fopen("rt64_fb_log.txt", "w");
++                if (file == nullptr) {
++                    return;
++                }
++            }
++
++            va_list args;
++            va_start(args, fmt);
++            std::vfprintf(file, fmt, args);
++            va_end(args);
++            std::fputc('\n', file);
++            std::fflush(file);
++        }
++    };
++};
++
++#define RT64_FBLOG_RECT(r) (r).ulx, (r).uly, (r).lrx, (r).lry
++#define RT64_FBLOG_RECT_FMT "(%d,%d)-(%d,%d)"
+diff --git a/src/common/rt64_hlslpp.h b/src/common/rt64_hlslpp.h
+index 1450565..032ed28 100644
+--- a/src/common/rt64_hlslpp.h
++++ b/src/common/rt64_hlslpp.h
+@@ -10,4 +10,8 @@
+ #define HLSLPP_SCALAR
+ #endif
+ 
++// The scalar implementation uses labs() without including <stdlib.h>, which recent
++// macOS SDKs no longer bring in through <math.h>.
++#include <stdlib.h>
++
+ #include "hlsl++.h"
+\ No newline at end of file
+diff --git a/src/gbi/rt64_gbi.cpp b/src/gbi/rt64_gbi.cpp
+index 7006549..4984e7c 100644
+--- a/src/gbi/rt64_gbi.cpp
++++ b/src/gbi/rt64_gbi.cpp
+@@ -13,6 +13,7 @@
+ #include "rt64_gbi_f3dpd.h"
+ #include "rt64_gbi_f3dex.h"
+ #include "rt64_gbi_f3dex2.h"
++#include "rt64_gbi_f3dex2cbfd.h"
+ #include "rt64_gbi_f3dwave.h"
+ #include "rt64_gbi_f3dzex2.h"
+ #include "rt64_gbi_l3dex2.h"
+@@ -110,6 +111,8 @@ namespace RT64 {
+     const GBIInstance   F3DLX2_FIFO_2_08_REJ      = { "F3DLX2.fifo 2.08.Rej",                      GBIUCode::F3DEX2,      { true,   false,  true,   false,  false } }; // Needs confirmation.
+     const GBIInstance   F3DEX2_FIFO_2_08_CRUISN   = { "F3DEX2.fifo 2.08 (Cruis'n Exotica)",        GBIUCode::Unknown,     { false,  false,  false,  false,  false } }; // Needs confirmation.
+     const GBIInstance   F3DEX2_FIFO_2_08_PL       = { "F3DEX2.fifo 2.08 (POSLIGHT)",               GBIUCode::F3DEX2,      { false,  false,  false,  false,  true  } };
++    const GBIInstance   F3DEXBG_NON_FIFO_2_08     = { "F3DEXBG.NoN fifo 2.08 (Conker's Bad Fur Day)", GBIUCode::F3DEX2CBFD, { false,  true,   false,  false,  false } };
++    const GBIInstance   F3DEX_NON_FIFO_2_08_CBFD  = { "F3DEX.NoN fifo 2.08 (Conker's Bad Fur Day)",   GBIUCode::F3DEX2CBFD,   { false,  true,   false,  false,  false } };
+     const GBIInstance   F3DEX2_XBUS_2_05          = { "F3DEX2.xbus 2.05",                          GBIUCode::F3DEX2,      { false,  false,  false,  false,  false } }; // Needs confirmation.
+     const GBIInstance   F3DEX2_XBUS_2_07          = { "F3DEX2.xbus 2.07",                          GBIUCode::F3DEX2,      { false,  false,  false,  false,  false } }; // Needs confirmation.
+     const GBIInstance   F3DLX2_XBUS_2_07_REJ      = { "F3DLX2.xbus 2.07.Rej",                      GBIUCode::F3DEX2,      { true,   false,  true,   false,  false } }; // Needs confirmation.
+@@ -160,7 +163,7 @@ namespace RT64 {
+     // 
+     //                  Length      Hash                    Known instances               
+     //     
+-    static std::array<GBISegment, 94> textSegments = {
++    static std::array<GBISegment, 96> textSegments = {
+             GBISegment{ 0x1408,     0x9C0926F5E466BE70ULL,  { &F3D_SDK_E } }, // Needs confirmation.
+             GBISegment{ 0x1400,     0x34EAA6E921BCF1B2ULL,  { &F3D_SDK_F, &F3D_SDK_UNKNOWN_G, &F3D_SDK_UNKNOWN_H } }, // Needs confirmation.
+             GBISegment{ 0x1408,     0x3E05E9BBE814C700ULL,  { &F3D_FIFO_SDK_E } }, // Needs confirmation.
+@@ -211,6 +214,8 @@ namespace RT64 {
+             GBISegment{ 0x1390,     0x0B8FE363267ADCB4ULL,  { &F3DEX2_FIFO_2_06 } },
+             GBISegment{ 0x1390,     0x8C1C9814E75E1B4BULL,  { &F3DEX2_FIFO_2_07 } },
+             GBISegment{ 0x1390,     0xCF55FAE288BFE48DULL,  { &F3DEX2_FIFO_2_08 } }, // Needs confirmation.
++            GBISegment{ 0x1390,     0xEFF7E499684E95B2ULL,  { &F3DEXBG_NON_FIFO_2_08 } },
++            GBISegment{ 0x1390,     0x5B76BAEB4121C82CULL,  { &F3DEX_NON_FIFO_2_08_CBFD } },
+             GBISegment{ 0x1188,     0xB9FBB8E71F72B596ULL,  { &F3DEX2_FIFO_2_08_REJ } }, // Needs confirmation.
+             GBISegment{ 0x1188,     0x5235C026EC14B4FBULL,  { &F3DLX2_FIFO_2_08_REJ } }, // Needs confirmation.
+             GBISegment{ 0x1378,     0xC2AE06B691610132ULL,  { &F3DEX2_FIFO_2_08_CRUISN } }, // Needs confirmation.
+@@ -257,7 +262,7 @@ namespace RT64 {
+             GBISegment{ 0x10B0,     0xE8028E4BC6529E6EULL,  { &ZSORTP_0_33 } }, // Needs confirmation.
+     };
+ 
+-    static std::array<GBISegment, 105> dataSegments = {
++    static std::array<GBISegment, 107> dataSegments = {
+             GBISegment{ 0x800,      0xEEB10D73400213B3ULL,  { &F3D_SDK_E } }, // Needs confirmation.
+             GBISegment{ 0x800,      0x49651E384B48F694ULL,  { &F3D_SDK_F } }, // Needs confirmation.
+             GBISegment{ 0x800,      0x1A736198F90E81C5ULL,  { &F3D_SDK_UNKNOWN_G } }, // Needs confirmation.
+@@ -318,6 +323,8 @@ namespace RT64 {
+             GBISegment{ 0x410,      0x47BA278DD7DB79EBULL,  { &F3DLX2_FIFO_2_06_REJ } }, // Needs confirmation.
+             GBISegment{ 0x420,      0xF8649121FAB40A06ULL,  { &F3DEX2_FIFO_2_07 } },
+             GBISegment{ 0x420,      0x3D4CAB9C82AD3772ULL,  { &F3DEX2_FIFO_2_08 } }, // Needs confirmation.
++            GBISegment{ 0x420,      0xAD59E246BCF1B2C2ULL,  { &F3DEXBG_NON_FIFO_2_08 } },
++            GBISegment{ 0x420,      0xD6FA1415D3E78D13ULL,  { &F3DEX_NON_FIFO_2_08_CBFD } },
+             GBISegment{ 0x410,      0x14F9D11C0F58AFB5ULL,  { &F3DEX2_FIFO_2_08_REJ } }, // Needs confirmation.
+             GBISegment{ 0x410,      0x25A00931C3C2A573ULL,  { &F3DLX2_FIFO_2_08_REJ } }, // Needs confirmation.
+             GBISegment{ 0x420,      0xD381B0139965EE5CULL,  { &F3DEX2_FIFO_2_08_CRUISN } }, // Needs confirmation.
+@@ -499,6 +506,9 @@ namespace RT64 {
+             case GBIUCode::L3DEX2:
+                 GBI_L3DEX2::setup(&gbi);
+                 break;
++            case GBIUCode::F3DEX2CBFD:
++                GBI_F3DEX2CBFD::setup(&gbi);
++                break;
+             default:
+                 assert(false && "Unknown UCode.");
+                 break;
+diff --git a/src/gbi/rt64_gbi.h b/src/gbi/rt64_gbi.h
+index 69c35d2..bcea8ec 100644
+--- a/src/gbi/rt64_gbi.h
++++ b/src/gbi/rt64_gbi.h
+@@ -28,6 +28,7 @@ namespace RT64 {
+         S2DEX,
+         S2DEX2,
+         L3DEX2,
++        F3DEX2CBFD,
+         Count
+     };
+ 
+diff --git a/src/gbi/rt64_gbi_f3dex2cbfd.cpp b/src/gbi/rt64_gbi_f3dex2cbfd.cpp
+new file mode 100644
+index 0000000..3db0968
+--- /dev/null
++++ b/src/gbi/rt64_gbi_f3dex2cbfd.cpp
+@@ -0,0 +1,119 @@
++//
++// RT64
++//
++// Conker's Bad Fur Day's modified F3DEX2, based on GLideN64's F3DEX2CBFD.
++// Commands not listed here behave as in F3DEX2.
++//
++
++#include "rt64_gbi_f3dex2cbfd.h"
++
++#include "hle/rt64_interpreter.h"
++
++#include "rt64_f3d.h"
++#include "rt64_gbi_f3dex2.h"
++
++namespace RT64 {
++    namespace GBI_F3DEX2CBFD {
++        // The game's G_LIGHTING is kept aside: lighting is computed into the vertex
++        // colours on the CPU (RSP::lightVerticesCBFD), so the shaders must not light
++        // them again. Texture generation also relies on these normals, which RT64's
++        // shaders can't see, so it's disabled for now.
++        void geometryMode(State *state, DisplayList **dl) {
++            RSP *rsp = state->rsp.get();
++            const uint32_t offMask = (*dl)->p0(0, 24);
++            const uint32_t onMask = (*dl)->w1;
++            const uint32_t current = rsp->geometryModeStack[rsp->geometryModeStackSize - 1];
++            const uint32_t previous = current | (rsp->cbfd.lighting ? G_LIGHTING : 0);
++            const uint32_t requested = (previous & offMask) | onMask;
++            rsp->cbfd.lighting = (requested & G_LIGHTING) != 0;
++            rsp->modifyGeometryMode(0, requested & ~(G_LIGHTING | G_TEXTURE_GEN | G_TEXTURE_GEN_LINEAR));
++        }
++
++        void vertex(State *state, DisplayList **dl) {
++            uint8_t vtxCount = (*dl)->p0(12, 8);
++            state->rsp->setVertexCBFD((*dl)->w1, vtxCount, (*dl)->p0(1, 7) - vtxCount);
++        }
++
++        void moveWord(State *state, DisplayList **dl) {
++            switch ((*dl)->p0(16, 8)) {
++            case G_MW_NUMLIGHT:
++                state->rsp->cbfd.lightCount = (*dl)->w1 / 48;
++                break;
++            case F3DEX2CBFD_G_MW_COORD_MOD:
++                state->rsp->setCoordModCBFD((*dl)->w0, (*dl)->w1);
++                break;
++            default:
++                GBI_F3DEX2::moveWord(state, dl);
++                break;
++            }
++        }
++
++        void moveMem(State *state, DisplayList **dl) {
++            switch ((*dl)->p0(0, 8)) {
++            case F3DEX2_G_MV_VIEWPORT:
++                state->rsp->setViewport((*dl)->w1);
++                break;
++            case F3DEX2_G_MV_LIGHT: {
++                const uint32_t offset = (*dl)->p0(5, 14);
++                const uint32_t n = offset / 48;
++                if (n < 2) {
++                    state->rsp->setLookAt(n, (*dl)->w1);
++                }
++                else {
++                    state->rsp->setLightCBFD(n - 2, (*dl)->w1);
++                }
++
++                break;
++            }
++            case F3DEX2CBFD_G_MV_NORMALES:
++                state->rsp->cbfd.normalBase = state->rsp->fromSegmentedMasked((*dl)->w1);
++                break;
++            default:
++                break;
++            }
++        }
++
++        // The microcode reuses G_LOAD_UCODE to switch to its advanced lighting mode.
++        void switchLightingMode(State *state, DisplayList **dl) {
++            state->rsp->cbfd.advancedLighting = true;
++        }
++
++        void tri4(State *state, DisplayList **dl) {
++            const uint32_t w0 = (*dl)->w0;
++            const uint32_t w1 = (*dl)->w1;
++            auto field = [](uint32_t w, uint32_t shift, uint32_t bits) { return (w >> shift) & ((1U << bits) - 1); };
++            const uint32_t v[12] = {
++                field(w0, 23, 5), field(w0, 18, 5), (field(w0, 15, 3) << 2) | field(w1, 30, 2),
++                field(w0, 10, 5), field(w0, 5, 5), field(w0, 0, 5),
++                field(w1, 25, 5), field(w1, 20, 5), field(w1, 15, 5),
++                field(w1, 10, 5), field(w1, 5, 5), field(w1, 0, 5),
++            };
++
++            for (int t = 0; t < 4; t++) {
++                const uint32_t a = v[t * 3 + 0], b = v[t * 3 + 1], c = v[t * 3 + 2];
++                // Unused slots repeat an index.
++                if ((a != b) && (b != c) && (a != c)) {
++                    state->rsp->drawIndexedTri(a, b, c);
++                }
++            }
++        }
++
++        void reset(State *state) {
++            state->rsp->setClipRatioAll(2U);
++            state->rsp->cbfd.advancedLighting = false;
++        }
++
++        void setup(GBI *gbi) {
++            GBI_F3DEX2::setup(gbi);
++            gbi->resetFromTask = &reset;
++            gbi->map[F3DEX2_G_GEOMETRYMODE] = &geometryMode;
++            gbi->map[F3DEX2_G_VTX] = &vertex;
++            gbi->map[F3DEX2_G_MOVEWORD] = &moveWord;
++            gbi->map[F3DEX2_G_MOVEMEM] = &moveMem;
++            gbi->map[F3DEX2_G_LOAD_UCODE] = &switchLightingMode;
++            for (uint32_t i = 0; i < 16; i++) {
++                gbi->map[F3DEX2CBFD_G_TRI4 + i] = &tri4;
++            }
++        }
++    }
++};
+diff --git a/src/gbi/rt64_gbi_f3dex2cbfd.h b/src/gbi/rt64_gbi_f3dex2cbfd.h
+new file mode 100644
+index 0000000..99ef5c2
+--- /dev/null
++++ b/src/gbi/rt64_gbi_f3dex2cbfd.h
+@@ -0,0 +1,20 @@
++//
++// RT64
++//
++
++#pragma once
++
++#include "rt64_gbi.h"
++
++// Conker's Bad Fur Day's modified F3DEX2: F3DEX2 with a different lighting
++// model (point lights, per-vertex normals held apart from the vertices, a
++// coordinate modifier) and a four-triangle command.
++#define F3DEX2CBFD_G_TRI4 0x10
++#define F3DEX2CBFD_G_MV_NORMALES 14
++#define F3DEX2CBFD_G_MW_COORD_MOD 0x10
++
++namespace RT64 {
++    namespace GBI_F3DEX2CBFD {
++        void setup(GBI *gbi);
++    };
++};
+diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
+index ee8bc1f..428208c 100644
+--- a/src/hle/rt64_application.cpp
++++ b/src/hle/rt64_application.cpp
+@@ -245,6 +245,11 @@ namespace RT64 {
+                         // We don't know yet what driver will fix the issue for RDNA4, so if it's newer than BrokenRDNA4DriverD3D12, we only force Vulkan if it's in Automatic mode.
+                         forceVulkanForCompatibility = true;
+                     }
++                    else if (device->getCapabilities().uma) {
++                        // Integrated AMD graphics (sharing system memory) crashed at start in D3D12: a Ryzen 5 5560U (Vega) failed to create
++                        // its render targets and upload buffers, and nothing got drawn. Vulkan runs on the same machine, so it's the automatic choice here.
++                        forceVulkanForCompatibility = true;
++                    }
+                     else {
+                         // Wireframe artifacts have been reported when using a high-precision color format on RDNA3 GPUs in D3D12. The workaround is to switch to Vulkan if this is the case.
+                         const bool isRX7 = deviceDescription.name.find("AMD Radeon RX 7") != std::string::npos;
+diff --git a/src/hle/rt64_framebuffer_manager.cpp b/src/hle/rt64_framebuffer_manager.cpp
+index d7caa12..60112aa 100644
+--- a/src/hle/rt64_framebuffer_manager.cpp
++++ b/src/hle/rt64_framebuffer_manager.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "rt64_framebuffer_manager.h"
+ 
++#include "common/rt64_fblog.h"
++
+ #include <cassert>
+ #include <algorithm>
+ 
+@@ -91,6 +93,12 @@ namespace RT64 {
+         RenderTargetManager &targetManager, const ShaderLibrary *shaderLibrary)
+     {
+         auto it = framebuffers.find(op.writeChanges.address);
++        if (FbLog::threadActive()) {
++            FbLog::print("[%s %llu] writeChanges (RDRAM upload) to fb 0x%08X: %s", FbLog::threadSide(), (unsigned long long)(FbLog::threadFrame()), op.writeChanges.address,
++                (it == framebuffers.end()) ? "no fb" : ((it->second.lastWriteType == Framebuffer::Type::None) ? "skipped, lastWriteType None" :
++                ((it->second.lastWriteType == Framebuffer::Type::Depth) ? "into the DEPTH target" : "into the color target")));
++        }
++
+         if ((it != framebuffers.end()) && (it->second.lastWriteType != Framebuffer::Type::None)) {
+             const FramebufferChange *fbChange = fbChangePool.get(op.writeChanges.id);
+             assert(fbChange != nullptr);
+@@ -174,6 +182,12 @@ namespace RT64 {
+                 tileCopy.readDepthFromStorage = true;
+             }
+         }
++
++        if (FbLog::threadActive()) {
++            FbLog::print("[%s %llu] tileCopy setup id %llu fb 0x%08X (w %u h %u everUsedAsDepth %d) tile (%u,%u)-(%u,%u) -> scaled left %u top %u size %ux%u, rt %ux%u misalign %u, readColorFromStorage %d readDepthFromStorage %d",
++                FbLog::threadSide(), (unsigned long long)(FbLog::threadFrame()), (unsigned long long)(tileCopy.id), fbIt->second.addressStart, fbIt->second.width, fbIt->second.height, fbIt->second.everUsedAsDepth,
++                fbTile.left, fbTile.top, fbTile.right, fbTile.bottom, tileCopy.left, tileCopy.top, tileWidth, tileHeight, rtWidth, rtHeight, rtMisalignX, tileCopy.readColorFromStorage, tileCopy.readDepthFromStorage);
++        }
+     }
+ 
+     void FramebufferManager::createTileCopyRecord(RenderWorker *renderWorker, const FramebufferOperation &op, const FramebufferStorage &fbStorage,
+@@ -198,6 +212,13 @@ namespace RT64 {
+             }
+         }
+ 
++        if (FbLog::threadActive()) {
++            const FixedRect &r = fbIt->second.lastWriteRect;
++            FbLog::print("[%s %llu] tileCopy record id %llu fb 0x%08X lastWriteType %d lastWriteRect " RT64_FBLOG_RECT_FMT " colorTarget %ux%u%s",
++                FbLog::threadSide(), (unsigned long long)(FbLog::threadFrame()), (unsigned long long)(tileCopy.id), fbIt->second.addressStart, int(fbIt->second.lastWriteType), RT64_FBLOG_RECT(r),
++                colorTarget.width, colorTarget.height, (fbIt->second.lastWriteType == Framebuffer::Type::Depth) ? ": copies depth to color, then discards the fb's last write" : "");
++        }
++
+         // Copy from depth target if the last write was a depth buffer.
+         if (fbIt->second.lastWriteType == Framebuffer::Type::Depth) {
+             RenderTargetKey depthTargetKey(fbIt->second.addressStart, fbIt->second.width, fbIt->second.siz, Framebuffer::Type::Depth);
+@@ -908,6 +929,11 @@ namespace RT64 {
+         auto it = framebuffers.begin();
+         while (it != framebuffers.end()) {
+             if ((&it->second != changedFb) && (it->second.overlaps(addressStart, addressEnd))) {
++                if (FbLog::threadActive()) {
++                    FbLog::print("[%s %llu] changeRAM: fb 0x%08X wrote 0x%08X-0x%08X, overlapping fb 0x%08X-0x%08X (w %u h %u), which is marked rdramChanged",
++                        FbLog::threadSide(), (unsigned long long)(FbLog::threadFrame()), changedFb->addressStart, addressStart, addressEnd, it->second.addressStart, it->second.addressEnd, it->second.width, it->second.height);
++                }
++
+                 it->second.rdramChanged = true;
+             }
+ 
+diff --git a/src/hle/rt64_game_frame.cpp b/src/hle/rt64_game_frame.cpp
+index 87392d0..db00961 100644
+--- a/src/hle/rt64_game_frame.cpp
++++ b/src/hle/rt64_game_frame.cpp
+@@ -296,7 +296,10 @@ namespace RT64 {
+                 prevWorkloadMap = &prevFrame.frameMap.workloads[workloadMap.prevWorkloadIndex];
+             }
+ 
+-            // Match the transforms linearly in the order they were submitted.
++            // Match the transforms linearly in the order they were submitted. An ID with a different number of
++            // transforms than last frame isn't matched at all: pairing them in order would pair each transform after
++            // the first one added or removed with its neighbour's, and the model would fly apart for a frame (Conker's
++            // characters, whose parts change as their animation does). Unmatched, it's drawn as it is for that frame.
+             ModifiedBuffers modifiedBuffers;
+             auto curIt = curWorkload.transformIdMap.begin();
+             auto prevIt = prevWorkload.transformIdMap.begin();
+@@ -309,9 +312,20 @@ namespace RT64 {
+                     prevIt++;
+                 }
+                 else {
+-                    matchTransform(curWorkload, prevWorkload, curWorkloadMap, prevWorkloadMap, curIt->second, prevIt->second, modifiedBuffers);
+-                    curIt++;
+-                    prevIt++;
++                    const uint32_t id = curIt->first;
++                    const size_t curCount = curWorkload.transformIdMap.count(id);
++                    const size_t prevCount = prevWorkload.transformIdMap.count(id);
++                    if (curCount != prevCount) {
++                        std::advance(curIt, curCount);
++                        std::advance(prevIt, prevCount);
++                        continue;
++                    }
++
++                    for (size_t i = 0; i < curCount; i++) {
++                        matchTransform(curWorkload, prevWorkload, curWorkloadMap, prevWorkloadMap, curIt->second, prevIt->second, modifiedBuffers);
++                        curIt++;
++                        prevIt++;
++                    }
+                 }
+             }
+ 
+@@ -486,6 +500,17 @@ namespace RT64 {
+                         viewProjMap.rigidBody = prevViewProjMap.rigidBody;
+                     }
+ 
++                    // A game that doesn't say how its camera interpolates (Conker) gets it interpolated always, cuts between
++                    // cutscene shots too: the frames drawn between the game's showed the camera partway from one shot to the
++                    // next, inside the scenery. A cut isn't interpolated.
++                    const bool projectionAutomatic = (curProjGroup.matrixId == G_EX_ID_IGNORE) || (curProjGroup.matrixId == G_EX_ID_AUTO);
++                    if (viewProjMap.rigidBody.updateCameraCut(prevView, curView) && projectionAutomatic) {
++                        projectionLinearComponent = G_EX_COMPONENT_SKIP;
++                        projectionAngularComponent = G_EX_COMPONENT_SKIP;
++                        projectionScaleComponent = G_EX_COMPONENT_SKIP;
++                        projectionSkewComponent = G_EX_COMPONENT_SKIP;
++                    }
++
+                     viewProjMap.rigidBody.updateLinear(prevView, curView, projectionLinearComponent);
+                     viewProjMap.rigidBody.updateAngular(prevView, curView, projectionAngularComponent, projectionScaleComponent, projectionSkewComponent);
+                     viewProjMap.rigidBody.updateDecomposition(curView, projectionDecompose);
+@@ -744,17 +769,178 @@ namespace RT64 {
+                 const float *curPosFloatsRef = &curPosFloats[curVertexIndex * 3];
+                 const float *prevPosFloatsRef = &prevPosFloats[prevVertexIndex * 3];
+                 float *curVelFloatsRef = &curVelFloats[curVertexIndex * 3];
+-                for (uint32_t i = 0; i < curVertexCount; i++) {
+-                    for (uint32_t j = 0; j < 3; j++) {
+-                        curVelFloatsRef[i * 3 + j] = (curPosFloatsRef[i * 3 + j] - prevPosFloatsRef[i * 3 + j]);
+-                    }
++                // Vertices are paired by their order, so a transform matched to one drawing other geometry (same vertex
++                // count) would smear it. Motion that large in one frame isn't a model moving: leave those as they are.
++                const float MaxVertexStep = 64.0f;
++                bool plausible = true;
++                for (uint32_t i = 0; (i < curVertexCount * 3) && plausible; i++) {
++                    plausible = fabsf(curPosFloatsRef[i] - prevPosFloatsRef[i]) < MaxVertexStep;
+                 }
+ 
+-                modifiedBuffers.positionVelocity = true;
++                if (plausible) {
++                    for (uint32_t i = 0; i < curVertexCount; i++) {
++                        for (uint32_t j = 0; j < 3; j++) {
++                            curVelFloatsRef[i * 3 + j] = (curPosFloatsRef[i * 3 + j] - prevPosFloatsRef[i * 3 + j]);
++                        }
++                    }
++
++                    modifiedBuffers.positionVelocity = true;
++                }
+             }
+         }
+ 
+-        if ((curGroup.texcoordInterpolation != G_EX_COMPONENT_SKIP) && (curVertexCount == prevVertexCount)) {
++        // Texture coordinates interpolated while the positions aren't: geometry rebuilt every frame with its
++        // coordinates projected from its position (Conker's Bad Fur Day's shadows: the ground under a character,
++        // clipped anew each frame, with the shadow's texture projected onto it from the light's point of view).
++        // Its vertices can't be paired with last frame's, so last frame's projection is fitted instead (a
++        // perspective map from position to texture coordinates, by least squares, in world space) and each
++        // vertex's coordinates last frame are taken from it.
++        if ((curGroup.texcoordInterpolation == G_EX_COMPONENT_INTERPOLATE) && (curGroup.vertexInterpolation == G_EX_COMPONENT_SKIP) && (curVertexCount > 0) && (prevVertexCount >= 3)) {
++            const float *prevLocal = &prevWorkload.drawData.posFloats[prevVertexIndex * 3];
++            const float *prevTc = &prevWorkload.drawData.tcFloats[prevVertexIndex * 2];
++            const float *curLocal = &curWorkload.drawData.posFloats[curVertexIndex * 3];
++            const float *curTc = &curWorkload.drawData.tcFloats[curVertexIndex * 2];
++            float *curTcVel = &curWorkload.drawData.tcVelFloats[curVertexIndex * 2];
++
++            // Positions in the world: each frame's are relative to its own transform, which can move.
++            thread_local std::vector<float> prevWorld, curWorld;
++            auto toWorld = [](const float *local, uint32_t count, const hlslpp::float4x4 &m, std::vector<float> &out) {
++                out.resize(count * 3);
++                for (uint32_t i = 0; i < count; i++) {
++                    const hlslpp::float4 w = hlslpp::mul(hlslpp::float4(local[i * 3 + 0], local[i * 3 + 1], local[i * 3 + 2], 1.0f), m);
++                    out[i * 3 + 0] = w.x;
++                    out[i * 3 + 1] = w.y;
++                    out[i * 3 + 2] = w.z;
++                }
++            };
++            toWorld(prevLocal, prevVertexCount, prevTransform, prevWorld);
++            toWorld(curLocal, curVertexCount, curTransform, curWorld);
++            const float *prevPos = prevWorld.data();
++            const float *curPos = curWorld.data();
++
++            // The texture's extent last frame.
++            float tcMin[2] = { FLT_MAX, FLT_MAX }, tcMax[2] = { -FLT_MAX, -FLT_MAX };
++            double mean[3] = {}, meanSq = 0.0;
++            for (uint32_t i = 0; i < prevVertexCount; i++) {
++                for (int b = 0; b < 2; b++) {
++                    tcMin[b] = std::min(tcMin[b], prevTc[i * 2 + b]);
++                    tcMax[b] = std::max(tcMax[b], prevTc[i * 2 + b]);
++                }
++                for (int j = 0; j < 3; j++) mean[j] += prevPos[i * 3 + j];
++            }
++            for (int j = 0; j < 3; j++) mean[j] /= prevVertexCount;
++            for (uint32_t i = 0; i < prevVertexCount; i++) {
++                for (int j = 0; j < 3; j++) meanSq += (prevPos[i * 3 + j] - mean[j]) * (prevPos[i * 3 + j] - mean[j]);
++            }
++            const double scale = std::sqrt(meanSq / prevVertexCount) + 1e-9;
++
++            // s = (a . q + a0) / (d . q + 1) and t = (b . q + b0) / (d . q + 1), q the normalised position,
++            // made linear: a . q + a0 - s (d . q) = s. Eleven unknowns: a, a0, b, b0 and d.
++            double normal[11][12] = {};
++            uint32_t used = 0;
++            auto addRow = [&](const double row[11], double rhs) {
++                for (int r = 0; r < 11; r++) {
++                    for (int c = 0; c < 11; c++) normal[r][c] += row[r] * row[c];
++                    normal[r][11] += row[r] * rhs;
++                }
++            };
++            // Every vertex follows the projection, those on the texture's edges too: the game clips the ground
++            // where the projection reaches them.
++            for (uint32_t i = 0; i < prevVertexCount; i++) {
++                const double q[3] = { (prevPos[i * 3 + 0] - mean[0]) / scale, (prevPos[i * 3 + 1] - mean[1]) / scale, (prevPos[i * 3 + 2] - mean[2]) / scale };
++                const double s = prevTc[i * 2 + 0], t = prevTc[i * 2 + 1];
++                const double rowS[11] = { q[0], q[1], q[2], 1.0, 0.0, 0.0, 0.0, 0.0, -s * q[0], -s * q[1], -s * q[2] };
++                const double rowT[11] = { 0.0, 0.0, 0.0, 0.0, q[0], q[1], q[2], 1.0, -t * q[0], -t * q[1], -t * q[2] };
++                addRow(rowS, s);
++                addRow(rowT, t);
++                used++;
++            }
++
++            // A little ridge: flat ground leaves the coefficients across it undetermined.
++            double trace = 0.0;
++            for (int r = 0; r < 11; r++) trace += normal[r][r];
++            for (int r = 0; r < 11; r++) normal[r][r] += 1e-7 * trace + 1e-12;
++
++            // Gaussian elimination with partial pivoting.
++            bool solved = (used >= 6);
++            for (int c = 0; (c < 11) && solved; c++) {
++                int pivot = c;
++                for (int r = c + 1; r < 11; r++) {
++                    if (fabs(normal[r][c]) > fabs(normal[pivot][c])) pivot = r;
++                }
++                if (fabs(normal[pivot][c]) < 1e-18) {
++                    solved = false;
++                    break;
++                }
++                if (pivot != c) {
++                    for (int k = 0; k < 12; k++) std::swap(normal[c][k], normal[pivot][k]);
++                }
++                for (int r = 0; r < 11; r++) {
++                    if (r == c) continue;
++                    const double f = normal[r][c] / normal[c][c];
++                    for (int k = c; k < 12; k++) normal[r][k] -= f * normal[c][k];
++                }
++            }
++
++            if (solved) {
++                double coef[11];
++                for (int r = 0; r < 11; r++) coef[r] = normal[r][11] / normal[r][r];
++                auto project = [&](const float *p, double out[2]) {
++                    const double q[3] = { (p[0] - mean[0]) / scale, (p[1] - mean[1]) / scale, (p[2] - mean[2]) / scale };
++                    const double w = coef[8] * q[0] + coef[9] * q[1] + coef[10] * q[2] + 1.0;
++                    out[0] = (coef[0] * q[0] + coef[1] * q[1] + coef[2] * q[2] + coef[3]) / w;
++                    out[1] = (coef[4] * q[0] + coef[5] * q[1] + coef[6] * q[2] + coef[7]) / w;
++                };
++
++                // Only if last frame's coordinates fit it closely (on average within 1% of the texture's extent).
++                double residual = 0.0;
++                for (uint32_t i = 0; i < prevVertexCount; i++) {
++                    double predicted[2];
++                    project(&prevPos[i * 3], predicted);
++                    residual += fabs(predicted[0] - prevTc[i * 2 + 0]) + fabs(predicted[1] - prevTc[i * 2 + 1]);
++                }
++                residual /= std::max(used, 1U);
++                const double spread = std::max(tcMax[0] - tcMin[0], tcMax[1] - tcMin[1]);
++
++                // The vertices fitted must cover the texture in both directions: a few, or ones along a line,
++                // fit closely while leaving the map across them undetermined.
++                float usedMin[2] = { FLT_MAX, FLT_MAX }, usedMax[2] = { -FLT_MAX, -FLT_MAX };
++                for (uint32_t i = 0; i < prevVertexCount; i++) {
++                    for (int b = 0; b < 2; b++) {
++                        usedMin[b] = std::min(usedMin[b], prevTc[i * 2 + b]);
++                        usedMax[b] = std::max(usedMax[b], prevTc[i * 2 + b]);
++                    }
++                }
++                const bool covered = (used >= 12) && ((usedMax[0] - usedMin[0]) > 0.25 * spread) && ((usedMax[1] - usedMin[1]) > 0.25 * spread);
++                if (covered && (spread > 0.0) && (residual <= 0.01 * spread)) {
++                    // The shadow moves a few texels a frame: a vertex whose coordinates would move more than a
++                    // quarter of the texture means the map doesn't hold there, and the frame is drawn as it is.
++                    const double maxStep = 0.25 * spread;
++                    bool plausible = true;
++                    for (uint32_t i = 0; (i < curVertexCount) && plausible; i++) {
++                        double predicted[2];
++                        project(&curPos[i * 3], predicted);
++                        for (int b = 0; b < 2; b++) {
++                            // Last frame's coordinates were clipped to the texture's edges too.
++                            const double previous = std::clamp(predicted[b], double(tcMin[b]), double(tcMax[b]));
++                            const double step = curTc[i * 2 + b] - previous;
++                            plausible = plausible && std::isfinite(step) && (fabs(step) <= maxStep);
++                            curTcVel[i * 2 + b] = float(step);
++                        }
++                    }
++
++                    if (plausible) {
++                        modifiedBuffers.texcoordVelocity = true;
++                    }
++                    else {
++                        for (uint32_t i = 0; i < curVertexCount * 2; i++) {
++                            curTcVel[i] = 0.0f;
++                        }
++                    }
++                }
++            }
++        }
++        else if ((curGroup.texcoordInterpolation != G_EX_COMPONENT_SKIP) && (curVertexCount == prevVertexCount)) {
+             const std::vector<float> &curTcFloats = curWorkload.drawData.tcFloats;
+             const std::vector<float> &prevTcFloats = prevWorkload.drawData.tcFloats;
+             std::vector<float> &curVelFloats = curWorkload.drawData.tcVelFloats;
+diff --git a/src/hle/rt64_rigid_body.cpp b/src/hle/rt64_rigid_body.cpp
+index fd8b3eb..7f54303 100644
+--- a/src/hle/rt64_rigid_body.cpp
++++ b/src/hle/rt64_rigid_body.cpp
+@@ -4,6 +4,9 @@
+ 
+ #include "rt64_rigid_body.h"
+ 
++#include <algorithm>
++#include <cmath>
++
+ #include "../include/rt64_extended_gbi.h"
+ #include "common/rt64_math.h"
+ 
+@@ -24,11 +27,11 @@ namespace RT64 {
+             hlslpp::float3 prevPosition = prevTransform[3].xyz;
+             hlslpp::float3 curPosition = curTransform[3].xyz;
+             hlslpp::float3 curLinearVelocity = curPosition - prevPosition;
+-            hlslpp::float3 curAcceleration = (curLinearVelocity - linearVelocity);
+             float prevVelMag = hlslpp::length(linearVelocity);
+             float curVelMag = hlslpp::length(curLinearVelocity);
+-            float dotCurVel = std::max(hlslpp::dot(linearVelocity / std::max(prevVelMag, Epsilon), curLinearVelocity / std::max(curVelMag, Epsilon))[0], Epsilon);
+-            curVelMag /= dotCurVel;
++            // A change of direction alone isn't a teleport: animations swing parts back and forth
++            // (Conker's walk reverses some of his every few frames), and snapping them on each
++            // reversal while the rest is interpolated makes the model vibrate. Only a jump in speed is.
+             lerpTranslation = (curVelMag < VelocityTolerance) || (curVelMag / std::max(prevVelMag, Epsilon)) < MagnitudeThreshold;
+             linearVelocity = curLinearVelocity;
+         }
+@@ -70,6 +73,30 @@ namespace RT64 {
+         }
+     }
+ 
++    bool RigidBody::updateCameraCut(const hlslpp::float4x4 &prevView, const hlslpp::float4x4 &curView) {
++        // The camera itself (a view matrix's inverse): where it is (row 3) and which way it looks (row 2).
++        const hlslpp::float4x4 prevCamera = hlslpp::inverse(prevView);
++        const hlslpp::float4x4 curCamera = hlslpp::inverse(curView);
++        const float move = hlslpp::length(curCamera[3].xyz - prevCamera[3].xyz);
++        const hlslpp::float3 prevForward = prevCamera[2].xyz;
++        const hlslpp::float3 curForward = curCamera[2].xyz;
++        const float lengths = hlslpp::length(prevForward) * hlslpp::length(curForward);
++        const float cosTurn = (lengths > 1e-6f) ? float(hlslpp::dot(prevForward, curForward)) / lengths : 1.0f;
++        const float turn = std::acos(std::clamp(cosTurn, -1.0f, 1.0f));
++
++        // A cut is a jump well beyond both a camera's usual pace and the one it just had: moving further than MinCutMove
++        // (world units) or turning more than MinCutTurn in one game frame, and CutJump times as far as the frame before.
++        // A camera that speeds up keeps interpolating; one that jumps to another shot, whose in-between frames would show
++        // it partway along the jump (inside the scenery, looking between the two shots), doesn't.
++        const float MinCutMove = 150.0f; // TODO: Make configurable.
++        const float MinCutTurn = 50.0f * 3.14159265f / 180.0f;
++        const float CutJump = 4.0f;
++        const bool cut = ((move > MinCutMove) && (move > cameraMove * CutJump)) || ((turn > MinCutTurn) && (turn > cameraTurn * CutJump));
++        cameraMove = move;
++        cameraTurn = turn;
++        return cut;
++    }
++
+     void RigidBody::updatePerspective(const hlslpp::float4x4 &prevTransform, const hlslpp::float4x4 &curTransform, uint8_t perspInterpolation) {
+         // TODO auto perspective interpolation.
+         lerpPerspective = (perspInterpolation == G_EX_COMPONENT_INTERPOLATE);
+diff --git a/src/hle/rt64_rigid_body.h b/src/hle/rt64_rigid_body.h
+index 778e08b..f53d597 100644
+--- a/src/hle/rt64_rigid_body.h
++++ b/src/hle/rt64_rigid_body.h
+@@ -20,6 +20,10 @@ namespace RT64 {
+         bool lerpPerspective = false;
+         bool lerpDecompose = true;
+ 
++        // Cameras: how far the camera moved and turned (radians) over the last game frame.
++        float cameraMove = 0.0f;
++        float cameraTurn = 0.0f;
++
+         // Default constructor.
+         RigidBody();
+ 
+@@ -29,6 +33,10 @@ namespace RT64 {
+         // Updates the vectors with the data from the transforms and updates the rigid body to determine if rotation, scale, and skew interpolation should be skipped.
+         void updateAngular(const hlslpp::float4x4 &prevTransform, const hlslpp::float4x4 &curTransform, uint8_t rotInterpolation, uint8_t scaleInterpolation, uint8_t skewInterpolation);
+ 
++        // Cameras: whether going from prevView to curView is a cut to another shot rather than the camera moving, and
++        // keeps how far it moved and turned, to compare the next frame with.
++        bool updateCameraCut(const hlslpp::float4x4 &prevView, const hlslpp::float4x4 &curView);
++
+         // Determines if the perspective components of the transforms should be interpolated.
+         void updatePerspective(const hlslpp::float4x4 &prevTransform, const hlslpp::float4x4 &curTransform, uint8_t perspInterpolation);
+ 
+diff --git a/src/hle/rt64_rsp.cpp b/src/hle/rt64_rsp.cpp
+index 1da2550..5abe718 100644
+--- a/src/hle/rt64_rsp.cpp
++++ b/src/hle/rt64_rsp.cpp
+@@ -4,7 +4,9 @@
+ 
+ #include "rt64_rsp.h"
+ 
++#include <algorithm>
+ #include <cassert>
++#include <cmath>
+ 
+ #include "../include/rt64_extended_gbi.h"
+ #include "common/rt64_common.h"
+@@ -427,6 +429,155 @@ namespace RT64 {
+         setVertexCommon<false, sizeof(VertexEXV1)>(rdramAddress, dstIndex, dstIndex + vtxCount);
+     }
+ 
++    // Conker's Bad Fur Day (F3DEX2CBFD). Based on GLideN64's implementation.
++
++    void RSP::setVertexCBFD(uint32_t address, uint32_t vtxCount, uint32_t dstIndex) {
++        if ((dstIndex >= RSP_MAX_VERTICES) || ((dstIndex + vtxCount) > RSP_MAX_VERTICES)) {
++            assert(false && "Vertex indices are not valid. DL is possibly corrupted.");
++            return;
++        }
++
++        const uint32_t rdramAddress = fromSegmentedMasked(address);
++        const Vertex *dlVerts = reinterpret_cast<const Vertex *>(state->fromRDRAM(rdramAddress));
++        memcpy(&vertices[dstIndex], dlVerts, sizeof(Vertex) * vtxCount);
++        if (cbfd.lighting) {
++            lightVerticesCBFD(dstIndex, vtxCount);
++        }
++
++        setVertexCommon<true, sizeof(Vertex)>(rdramAddress, dstIndex, dstIndex + vtxCount);
++    }
++
++    void RSP::setLightCBFD(uint32_t index, uint32_t address) {
++        if (index >= cbfd.lights.size()) {
++            return;
++        }
++
++        // Light layout (big-endian offsets): colour r,g,b at 0-2, direction x,y,z (s8) at 8-10,
++        // attenuation at 12, position x,y,z (s16) at 32-37.
++        const uint32_t rdramAddress = fromSegmentedMasked(address);
++        const uint8_t *data = state->fromRDRAM(rdramAddress);
++        auto byteAt = [&](uint32_t offset) { return data[offset ^ 3]; };
++        auto shortAt = [&](uint32_t offset) { return *reinterpret_cast<const int16_t *>(&data[offset ^ 2]); };
++        CBFDLight &light = cbfd.lights[index];
++        light.r = byteAt(0) / 255.0f;
++        light.g = byteAt(1) / 255.0f;
++        light.b = byteAt(2) / 255.0f;
++        float dx = int8_t(byteAt(8)), dy = int8_t(byteAt(9)), dz = int8_t(byteAt(10));
++        float len = std::sqrt(dx * dx + dy * dy + dz * dz);
++        if (len > 0.0f) {
++            dx /= len; dy /= len; dz /= len;
++        }
++        light.dir[0] = dx;
++        light.dir[1] = dy;
++        light.dir[2] = dz;
++        light.pos[0] = shortAt(32);
++        light.pos[1] = shortAt(34);
++        light.pos[2] = shortAt(36);
++        light.ca = byteAt(12) / 16.0f;
++    }
++
++    void RSP::setCoordModCBFD(uint32_t w0, uint32_t w1) {
++        if ((w0 & 8) != 0) {
++            return;
++        }
++
++        const uint32_t idx = (w0 >> 1) & 3;
++        const uint32_t pos = w0 & 0x30;
++        auto &mod = cbfd.coordMod;
++        if (pos == 0x00) {
++            mod[0 + idx] = float(int16_t(w1 >> 16));
++            mod[1 + idx] = float(int16_t(w1 & 0xFFFF));
++        }
++        else if (pos == 0x10) {
++            mod[4 + idx] = float(w1 >> 16) / 65536.0f;
++            mod[5 + idx] = float(w1 & 0xFFFF) / 65536.0f;
++            mod[12 + idx] = mod[0 + idx] + mod[4 + idx];
++            mod[13 + idx] = mod[1 + idx] + mod[5 + idx];
++        }
++        else if (pos == 0x20) {
++            mod[8 + idx] = float(int16_t(w1 >> 16));
++            mod[9 + idx] = float(int16_t(w1 & 0xFFFF));
++        }
++    }
++
++    void RSP::lightVerticesCBFD(uint32_t dstIndex, uint32_t vtxCount) {
++        const int numLights = int(std::min<uint32_t>(cbfd.lightCount, uint32_t(cbfd.lights.size() - 1)));
++        const auto &mod = cbfd.coordMod;
++        const uint32_t geometryMode = geometryModeStack[geometryModeStackSize - 1];
++        const bool pointLighting = (geometryMode & G_POINT_LIGHTING) != 0;
++
++        // Directional lights in model space: the modelview's rotation applied inversely.
++        hlslpp::float3 lightDirs[12];
++        const hlslpp::float4x4 &modelView = modelMatrixStack[modelMatrixStackSize - 1];
++        for (int l = 0; l < numLights; l++) {
++            const CBFDLight &light = cbfd.lights[l];
++            hlslpp::float4 d = hlslpp::mul(modelView, hlslpp::float4(light.dir[0], light.dir[1], light.dir[2], 0.0f));
++            hlslpp::float3 d3 = d.xyz;
++            float len = hlslpp::length(d3);
++            lightDirs[l] = (len > 0.0f) ? (d3 / len) : hlslpp::float3(0.0f, 0.0f, 0.0f);
++        }
++
++        const uint8_t *rdram = state->fromRDRAM(0);
++        for (uint32_t i = dstIndex; i < dstIndex + vtxCount; i++) {
++            Vertex &vtx = vertices[i];
++            if (int16_t(vtx.flag) < 0) {
++                continue;
++            }
++
++            const float px = (vtx.x + mod[8]) * mod[12];
++            const float py = (vtx.y + mod[9]) * mod[13];
++            const float pz = (vtx.z + mod[10]) * mod[14];
++
++            // The ambient colour follows the last light.
++            float r = cbfd.lights[numLights].r;
++            float g = cbfd.lights[numLights].g;
++            float b = cbfd.lights[numLights].b;
++
++            hlslpp::float3 normal(0.0f, 0.0f, 0.0f);
++            int l = numLights - 1;
++            if (cbfd.advancedLighting) {
++                const uint32_t normalAddress = cbfd.normalBase + (i << 1);
++                normal = hlslpp::float3(
++                    float(int8_t(rdram[(normalAddress + 0) ^ 3])) / 127.0f,
++                    float(int8_t(rdram[(normalAddress + 1) ^ 3])) / 127.0f,
++                    float(int8_t(vtx.flag & 0xFF)) / 127.0f);
++
++                // The last light is directional.
++                if (l >= 0) {
++                    float intensity = std::min(1.0f, float(hlslpp::dot(normal, lightDirs[l])));
++                    if (intensity > 0.0f) {
++                        r += cbfd.lights[l].r * intensity;
++                        g += cbfd.lights[l].g * intensity;
++                        b += cbfd.lights[l].b * intensity;
++                    }
++                }
++            }
++
++            // The others are point lights.
++            for (l = numLights - 2; l >= 0; l--) {
++                const CBFDLight &light = cbfd.lights[l];
++                const float vx = px - light.pos[0];
++                const float vy = py - light.pos[1];
++                const float vz = pz - light.pos[2];
++                const float len = 2.0f * (vx * vx + vy * vy + vz * vz) / 65536.0f;
++                float intensity = (len > 0.0f) ? std::min(1.0f, light.ca / len) : 1.0f;
++                if (cbfd.advancedLighting && pointLighting) {
++                    intensity *= std::min(1.0f, float(hlslpp::dot(normal, lightDirs[l])));
++                }
++
++                if (intensity > 0.0f) {
++                    r += light.r * intensity;
++                    g += light.g * intensity;
++                    b += light.b * intensity;
++                }
++            }
++
++            vtx.color.r = uint8_t(std::min(1.0f, r) * vtx.color.r);
++            vtx.color.g = uint8_t(std::min(1.0f, g) * vtx.color.g);
++            vtx.color.b = uint8_t(std::min(1.0f, b) * vtx.color.b);
++        }
++    }
++
+     void RSP::setVertexColorPD(uint32_t address) {
+         vertexColorPDAddress = fromSegmentedMasked(address);
+     }
+@@ -506,13 +657,18 @@ namespace RT64 {
+         const int workloadCursor = state->ext.workloadQueue->writeCursor;
+         Workload &workload = state->ext.workloadQueue->workloads[workloadCursor];
+ 
++        // A new group starts a new transform even when the matrix is the same: otherwise the vertices after a
++        // group is pushed or popped are added to the previous transform, in the group it was made in (the
++        // commands after a group would count as its own).
++        bool groupChanged = false;
+         if (extended.modelMatrixIdStackChanged) {
+             const int stackIndex = extended.modelMatrixIdStackSize - 1;
+             extended.curModelMatrixIdGroupIndex = int(workload.drawData.transformGroups.size());
+             workload.drawData.transformGroups.emplace_back(extended.modelMatrixIdStack[stackIndex]);
+             extended.modelMatrixIdStackChanged = false;
++            groupChanged = true;
+         }
+-        
++
+         // ModelViewProj is only updated when a vertex is processed and the flag is enabled.
+         auto &worldTransforms = workload.drawData.worldTransforms;
+         auto &worldTransformGroups = workload.drawData.worldTransformGroups;
+@@ -520,6 +676,12 @@ namespace RT64 {
+         auto &worldTransformPhysicalAddresses = workload.drawData.worldTransformPhysicalAddresses;
+         auto &worldTransformVertexIndices = workload.drawData.worldTransformVertexIndices;
+         bool addWorldTransform = (modelViewProjChanged || modelViewProjInserted);
++        if (groupChanged && !addWorldTransform && !worldTransforms.empty()) {
++            const hlslpp::float4x4 current = worldTransforms[curTransformIndex];
++            curTransformIndex = static_cast<uint16_t>(worldTransforms.size());
++            worldTransforms.emplace_back(current);
++            addWorldTransform = true;
++        }
+         if (modelViewProjChanged) {
+             computeModelViewProj();
+             curTransformIndex = static_cast<uint16_t>(worldTransforms.size());
+@@ -841,7 +1003,12 @@ namespace RT64 {
+         const uint32_t globalIndex = indices[vtxIndex];
+         const float screenZ = workload.drawData.posScreen[globalIndex][2] * DepthRange;
+         const float zValueFloat = zValue / 65536.0f;
+-        if (forceBranch || (screenZ < zValueFloat)) {
++        // A vertex behind the camera has a meaningless screen depth. The RSP's depth of
++        // such a vertex is out of range, which takes the branch (like GLideN64 does):
++        // otherwise a model whose test vertex is behind the camera, like a bridge
++        // being walked over, falls to its far version, often nothing.
++        const bool behindCamera = workload.drawData.posTransformed[globalIndex][3] <= 0.0f;
++        if (forceBranch || behindCamera || (screenZ < zValueFloat)) {
+             const uint32_t rdramAddress = fromSegmentedMasked(branchDl);
+             *dl = reinterpret_cast<DisplayList *>(state->fromRDRAM(rdramAddress)) - 1;
+         }
+@@ -1152,6 +1319,16 @@ namespace RT64 {
+ 
+             const interop::RSPViewport &viewport = viewportStack[viewportStackSize - 1];
+             const FixedRect viewportClipRect = viewport.rect(clipRatios.data());
++
++            // A triangle beside the 4:3 area is still drawn when the picture is widened, so it must still count: clamp
++            // it into the area horizontally (at least a pixel wide) instead of dropping it. A pair whose triangles are
++            // all beside it (a door at the side of the widened screen) otherwise has no draw area and isn't drawn at all.
++            const FixedRect clipRect = viewportClipRect.intersection(scissorRect);
++            if (!clipRect.isNull() && ((clipRect.lrx - clipRect.ulx) >= 4)) {
++                drawRect.ulx = std::clamp(drawRect.ulx, clipRect.ulx, clipRect.lrx - 4);
++                drawRect.lrx = std::clamp(drawRect.lrx, clipRect.ulx + 4, clipRect.lrx);
++            }
++
+             drawRect = viewportClipRect.intersection(scissorRect.intersection(drawRect));
+             if (!drawRect.isNull()) {
+                 fbPair.drawColorRect.merge(drawRect);
+diff --git a/src/hle/rt64_rsp.h b/src/hle/rt64_rsp.h
+index 61bb3b1..313f93a 100644
+--- a/src/hle/rt64_rsp.h
++++ b/src/hle/rt64_rsp.h
+@@ -162,6 +162,26 @@ namespace RT64 {
+         std::bitset<RSP_MAX_VERTICES> used;
+         std::array<Light, RSP_MAX_LIGHTS + 1> lights;
+         int lightCount;
++
++        // State for Conker's Bad Fur Day's modified F3DEX2 (GBIUCode::F3DEX2CBFD). Its
++        // lighting (point lights, separate normals, a coordinate modifier) doesn't map
++        // onto RT64's shader lighting, so it is computed into the vertex colours on the
++        // CPU and G_LIGHTING is hidden from the shaders.
++        struct CBFDLight {
++            float r = 0.0f, g = 0.0f, b = 0.0f;
++            float dir[3] = {};
++            float pos[3] = {};
++            float ca = 0.0f;
++        };
++
++        struct {
++            bool lighting = false;              // G_LIGHTING as the game set it.
++            bool advancedLighting = false;      // Switched on by G_LOAD_UCODE.
++            uint32_t normalBase = 0;            // Physical address of the per-vertex normals.
++            uint32_t lightCount = 0;
++            std::array<CBFDLight, 12> lights;
++            std::array<float, 20> coordMod = {};
++        } cbfd;
+         uint32_t vertexFogIndex;
+         uint32_t vertexLightIndex;
+         uint32_t vertexLightCount;
+@@ -254,6 +274,10 @@ namespace RT64 {
+         void setVertex(uint32_t address, uint32_t vtxCount, uint32_t dstIndex);
+         void setVertexPD(uint32_t address, uint32_t vtxCount, uint32_t dstIndex);
+         void setVertexEXV1(uint32_t address, uint32_t vtxCount, uint32_t dstIndex);
++        void setVertexCBFD(uint32_t address, uint32_t vtxCount, uint32_t dstIndex);
++        void setLightCBFD(uint32_t index, uint32_t address);
++        void setCoordModCBFD(uint32_t w0, uint32_t w1);
++        void lightVerticesCBFD(uint32_t dstIndex, uint32_t vtxCount);
+         void setVertexColorPD(uint32_t address);
+         void setVertexSegmentV1(bool isEnabled, uint32_t vertexElement, uint32_t vertexAddress, uint32_t baseSegmentAddress);
+         template<uint32_t floatCount, uint32_t vertexSize>
+diff --git a/src/hle/rt64_state.cpp b/src/hle/rt64_state.cpp
+index 2970e71..34210a0 100644
+--- a/src/hle/rt64_state.cpp
++++ b/src/hle/rt64_state.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "rt64_state.h"
+ 
++#include "common/rt64_fblog.h"
++
+ #include <cassert>
+ #include <cinttypes>
+ 
+@@ -540,6 +542,27 @@ namespace RT64 {
+         FramebufferPair &fbPair = workload.fbPairs[fbPairIndex];
+         fbPair.flushReason = flushReason;
+ 
++        // TEMP-DEBUG (Conker): FbLog, see common/rt64_fblog.h.
++        FbLog::setThreadFrame(workload.submissionFrame, "hle");
++        const bool fbLog = FbLog::threadActive();
++        if (fbLog) {
++            FbLog::print("[hle %llu] pair %d submit reason %d color 0x%08X w %u siz %u fmt %u depth 0x%08X depthRead %d depthWrite %d fillRectOnly %d projections %u calls %u",
++                (unsigned long long)(workload.submissionFrame), fbPairIndex, int(flushReason), fbPair.colorImage.address, fbPair.colorImage.width, fbPair.colorImage.siz, fbPair.colorImage.fmt,
++                fbPair.depthImage.address, fbPair.depthRead, fbPair.depthWrite, fbPair.fillRectOnly, fbPair.projectionCount, fbPair.gameCallCount);
++            FbLog::print("[hle %llu] pair %d drawColorRect " RT64_FBLOG_RECT_FMT " drawDepthRect " RT64_FBLOG_RECT_FMT " scissorRect " RT64_FBLOG_RECT_FMT " pendingFbOps %zu",
++                (unsigned long long)(workload.submissionFrame), fbPairIndex, RT64_FBLOG_RECT(fbPair.drawColorRect), RT64_FBLOG_RECT(fbPair.drawDepthRect), RT64_FBLOG_RECT(fbPair.scissorRect), drawFbOperations.size());
++            for (const FramebufferOperation &op : drawFbOperations) {
++                if (op.type == FramebufferOperation::Type::CreateTileCopy) {
++                    const FramebufferTile &t = op.createTileCopy.fbTile;
++                    FbLog::print("[hle %llu] pair %d   op tileCopy id %llu from 0x%08X tile (%u,%u)-(%u,%u) lineWidth %u siz %u fmt %u",
++                        (unsigned long long)(workload.submissionFrame), fbPairIndex, (unsigned long long)(op.createTileCopy.id), op.createTileCopy.address, t.left, t.top, t.right, t.bottom, t.lineWidth, t.siz, t.fmt);
++                }
++                else {
++                    FbLog::print("[hle %llu] pair %d   op type %d", (unsigned long long)(workload.submissionFrame), fbPairIndex, int(op.type));
++                }
++            }
++        }
++
+         // Add all the pending framebuffer operations to the first one that was found.
+         flushFramebufferOperations(fbPair);
+ 
+@@ -551,6 +574,10 @@ namespace RT64 {
+             uint32_t depthWriteWidth = 0;
+             RT64::Framebuffer *colorFb = &framebufferManager.get(colorImg.address, colorImg.siz, colorImg.width, colorHeight);
+             colorImg.formatChanged = colorFb->widthChanged || colorFb->sizChanged || colorFb->rdramChanged;
++            if (fbLog) {
++                FbLog::print("[hle %llu] pair %d colorFb 0x%08X w %u h %u widthChanged %d sizChanged %d rdramChanged %d -> formatChanged %d",
++                    (unsigned long long)(workload.submissionFrame), fbPairIndex, colorFb->addressStart, colorFb->width, colorFb->height, colorFb->widthChanged, colorFb->sizChanged, colorFb->rdramChanged, colorImg.formatChanged);
++            }
+             colorFb->clearChanged();
+             colorFb->addDitherPatterns(fbPair.ditherPatterns);
+ 
+@@ -562,6 +589,11 @@ namespace RT64 {
+ 
+                 depthFb = &framebufferManager.get(depthImg.address, G_IM_SIZ_16b, colorImg.width, colorHeight);
+                 depthImg.formatChanged = depthFb->widthChanged || depthFb->sizChanged || depthFb->rdramChanged;
++                if (fbLog) {
++                    FbLog::print("[hle %llu] pair %d depthFb 0x%08X w %u h %u widthChanged %d sizChanged %d rdramChanged %d -> formatChanged %d depthWriteWidth %u",
++                        (unsigned long long)(workload.submissionFrame), fbPairIndex, depthFb->addressStart, depthFb->width, depthFb->height, depthFb->widthChanged, depthFb->sizChanged, depthFb->rdramChanged, depthImg.formatChanged, depthWriteWidth);
++                }
++
+                 depthFb->clearChanged();
+ 
+                 // Detect a fast path by checking if the framebuffer pair previous to the current one only did fill rects.
+@@ -604,6 +636,10 @@ namespace RT64 {
+             }
+         }
+ 
++        if (fbLog) {
++            FbLog::print("[hle %llu] pair %d syncRequired %d", (unsigned long long)(workload.submissionFrame), fbPairIndex, fbPair.syncRequired);
++        }
++
+         // Store the process Id this framebuffer pair was submitted under.
+         fbPair.displayListAddress = displayListAddress;
+         fbPair.displayListCounter = displayListCounter;
+@@ -630,6 +666,16 @@ namespace RT64 {
+         {
+             framebufferManager.storeRAM(workload.fbStorage, RDRAM, fbPairIndex);
+             framebufferManager.checkRAM(RDRAM, differentFbs, true);
++
++            // TEMP-DEBUG (Conker): FbLog, see common/rt64_fblog.h. Framebuffers whose RDRAM changed outside the RDP (the CPU).
++            FbLog::setThreadFrame(workload.submissionFrame, "hle");
++            if (FbLog::threadActive()) {
++                FbLog::print("[hle %llu] checkRDRAM at pair %u: %zu framebuffers differ", (unsigned long long)(workload.submissionFrame), fbPairIndex, differentFbs.size());
++                for (const Framebuffer *fb : differentFbs) {
++                    FbLog::print("[hle %llu]   differs: fb 0x%08X w %u h %u siz %u lastWriteType %d RAMBytes %u",
++                        (unsigned long long)(workload.submissionFrame), fb->addressStart, fb->width, fb->height, fb->siz, int(fb->lastWriteType), fb->RAMBytes);
++                }
++            }
+             if (!differentFbs.empty()) {
+                 RenderWorkerExecution execution(ext.framebufferGraphicsWorker);
+                 framebufferManager.uploadRAM(ext.framebufferGraphicsWorker, differentFbs.data(), differentFbs.size(), workload.fbChangePool, RDRAM, true, drawFbOperations, drawFbDiscards, ext.shaderLibrary);
+diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
+index 5a331aa..3d4fca2 100644
+--- a/src/hle/rt64_workload_queue.cpp
++++ b/src/hle/rt64_workload_queue.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "rt64_workload_queue.h"
+ 
++#include "common/rt64_fblog.h"
++
+ #include "common/rt64_thread.h"
+ 
+ #include "rt64_present_queue.h"
+@@ -449,6 +451,15 @@ namespace RT64 {
+                         colorFb = &fbManager.get(colorImg.address, colorImg.siz, nativeColorWidth, nativeColorHeight);
+                     }
+ 
++                    // Draw at the framebuffer's full height, not only down to the lowest row this pair's triangles were seen
++                    // to cover. That was measured on the N64's 4:3 screen, where triangles beside it, or crossing the plane of
++                    // the camera, don't count; the widened picture does show them. A pair drawn only at the side (Conker's
++                    // objects, once the camera's depth-row copy splits them off from the level) was cut off below that row.
++                    const Framebuffer *heightFb = (colorFb != nullptr) ? colorFb : depthFb;
++                    if ((heightFb != nullptr) && (heightFb->width == nativeColorWidth)) {
++                        nativeColorHeight = std::max(nativeColorHeight, heightFb->height);
++                    }
++
+                     if (colorFb != nullptr) {
+                         fbKey.colorTargetKey = RenderTargetKey(colorFb->addressStart, colorFb->width, colorFb->siz, Framebuffer::Type::Color);
+                         colorTarget = &targetManager.get(fbKey.colorTargetKey);
+@@ -508,6 +519,16 @@ namespace RT64 {
+             colorDepthPairs.clear();
+ 
+             const uint32_t fbPairCount = (debuggerRenderer.framebufferIndex >= 0) ? (debuggerRenderer.framebufferIndex + 1) : workload.fbPairCount;
++
++            // TEMP-DEBUG (Conker): FbLog, see common/rt64_fblog.h.
++            FbLog::setThreadFrame(workload.submissionFrame, "hires");
++            const bool fbLog = FbLog::threadActive();
++            const unsigned long long fbLogFrame = (unsigned long long)(workload.submissionFrame);
++            if (fbLog) {
++                FbLog::print("[hires %llu] frame: %u pairs, resolutionScale %.4f x %.4f, aspectRatioSource %.4f target %.4f scale %.4f (rects are 10.2 fixed point: 4 = one pixel)",
++                    fbLogFrame, fbPairCount, float(workloadConfig.resolutionScale.x), float(workloadConfig.resolutionScale.y), workloadConfig.aspectRatioSource, workloadConfig.aspectRatioTarget, workloadConfig.aspectRatioScale);
++            }
++
+             for (uint32_t f = 0; f < fbPairCount; f++) {
+                 const FramebufferPair &fbPair = workload.fbPairs[f];
+ #           if RT_ENABLED
+@@ -538,9 +559,19 @@ namespace RT64 {
+                         depthFb->nativeTarget.resetBufferHistory();
+                     }
+ 
++                    if (fbLog) {
++                        FbLog::print("[hires %llu] pair %u targets: colorFb 0x%08X depthFb 0x%08X native %ux%u fixedResScale %.4f x %.4f -> rt %ux%u misalign %u; colorTarget %ux%u depthTarget %ux%u",
++                            fbLogFrame, f, (colorFb != nullptr) ? colorFb->addressStart : 0, (depthFb != nullptr) ? depthFb->addressStart : 0, nativeColorWidth, nativeColorHeight, float(fixedResScale.x), float(fixedResScale.y),
++                            rtWidth, rtHeight, targetMisalignX, (colorTarget != nullptr) ? colorTarget->width : 0, (colorTarget != nullptr) ? colorTarget->height : 0,
++                            (depthTarget != nullptr) ? depthTarget->width : 0, (depthTarget != nullptr) ? depthTarget->height : 0);
++                    }
++
+                     if ((colorTarget != nullptr) && colorTarget->resize(ext.workloadGraphicsWorker, rtWidth, rtHeight)) {
+                         resizedTargets.emplace(colorTarget);
+                         colorFb->readHeight = 0;
++                        if (fbLog) {
++                            FbLog::print("[hires %llu] pair %u   color target RESIZED to %ux%u", fbLogFrame, f, colorTarget->width, colorTarget->height);
++                        }
+                     }
+ 
+                     // Set up the dummy target used for rendering the depth if no depth framebuffer is active.
+@@ -566,6 +597,9 @@ namespace RT64 {
+                         if (depthTarget->resize(ext.workloadGraphicsWorker, rtWidth, rtHeight)) {
+                             resizedTargets.emplace(depthTarget);
+                             depthFb->readHeight = 0;
++                            if (fbLog) {
++                                FbLog::print("[hires %llu] pair %u   DEPTH target RESIZED to %ux%u (its contents are lost)", fbLogFrame, f, depthTarget->width, depthTarget->height);
++                            }
+                         }
+                     }
+                 }
+@@ -577,6 +611,10 @@ namespace RT64 {
+             // Make sure all depth targets are at least bigger than their corresponding color targets.
+             for (auto colorDepthPair : colorDepthPairs) {
+                 if (colorDepthPair.second->resize(ext.workloadGraphicsWorker, colorDepthPair.first->width, colorDepthPair.first->height)) {
++                    if (fbLog) {
++                        FbLog::print("[hires %llu] a depth target was RESIZED to match its color target: %ux%u", fbLogFrame, colorDepthPair.second->width, colorDepthPair.second->height);
++                    }
++
+                     resizedTargets.emplace(colorDepthPair.second);
+                 }
+             }
+@@ -709,6 +747,12 @@ namespace RT64 {
+             for (uint32_t f = 0; f < fbPairCount; f++) {
+                 const FramebufferPair &fbPair = workload.fbPairs[f];
+                 bool validTargets = getTargetsFromPair(f);
++                if (fbLog) {
++                    FbLog::print("[hires %llu] pair %u record: validTargets %d startOps %zu endOps %zu formatChanged color %d depth %d, depthFb lastWriteType %d readHeight %u height %u",
++                        fbLogFrame, f, validTargets, fbPair.startFbOperations.size(), fbPair.endFbOperations.size(), fbPair.colorImage.formatChanged, fbPair.depthImage.formatChanged,
++                        (validTargets && (depthFb != nullptr)) ? int(depthFb->lastWriteType) : -1, (validTargets && (depthFb != nullptr)) ? depthFb->readHeight : 0, (validTargets && (depthFb != nullptr)) ? depthFb->height : 0);
++                }
++
+                 fbManager.recordOperations(ext.workloadGraphicsWorker, &workload.fbChangePool, &workload.fbStorage, ext.shaderLibrary, ext.textureCache,
+                     fbPair.startFbOperations, targetManager, fixedResScale, f, workload.submissionFrame);
+ 
+@@ -738,6 +782,11 @@ namespace RT64 {
+ 
+                         if (colorFb->height > colorFb->readHeight) {
+                             uint32_t readRowCount = colorFb->height - colorFb->readHeight;
++                            if (fbLog) {
++                                FbLog::print("[hires %llu] pair %u   color target 0x%08X rows %u-%u reloaded from RDRAM%s", fbLogFrame, f, colorFb->addressStart, colorFb->readHeight, colorFb->height,
++                                    colorImg.formatChanged ? " (formatChanged: cleared first)" : "");
++                            }
++
+                             FramebufferChange *colorFbChange = colorFb->readChangeFromStorage(ext.workloadGraphicsWorker, workload.fbStorage, scratchFbChangePool,
+                                 Framebuffer::Type::Color, colorImg.fmt, f, colorFb->readHeight, readRowCount, ext.shaderLibrary);
+ 
+@@ -756,10 +805,20 @@ namespace RT64 {
+                         depthFbTypeChanged = (depthFb->lastWriteType == Framebuffer::Type::Color);
+ 
+                         bool imgFormatChanged = (colorFb == nullptr) ? colorImg.formatChanged : depthImg.formatChanged;
++                        if (fbLog && imgFormatChanged) {
++                            FbLog::print("[hires %llu] pair %u   DEPTH target CLEARED and reloaded from RDRAM (formatChanged)", fbLogFrame, f);
++                        }
++
+                         if (imgFormatChanged) {
+                             depthFb->discardLastWrite();
+                         }
+                         else if (depthFb->isLastWriteDifferent(Framebuffer::Type::Depth)) {
++                            if (fbLog) {
++                                const FixedRect &r = depthFb->lastWriteRect;
++                                FbLog::print("[hires %llu] pair %u   DEPTH target overwritten from its color-type target (lastWriteType %d) rect " RT64_FBLOG_RECT_FMT,
++                                    fbLogFrame, f, int(depthFb->lastWriteType), RT64_FBLOG_RECT(r));
++                            }
++
+                             RenderTargetKey otherDepthTargetKey(depthFb->addressStart, depthFb->width, depthFb->siz, depthFb->lastWriteType);
+                             RenderTarget &otherDepthTarget = targetManager.get(otherDepthTargetKey);
+                             if (!otherDepthTarget.isEmpty()) {
+@@ -777,6 +836,10 @@ namespace RT64 {
+ 
+                         if (depthFb->height > depthFb->readHeight) {
+                             uint32_t readRowCount = depthFb->height - depthFb->readHeight;
++                            if (fbLog) {
++                                FbLog::print("[hires %llu] pair %u   DEPTH target rows %u-%u reloaded from RDRAM (native %u wide)", fbLogFrame, f, depthFb->readHeight, depthFb->height, depthFb->width);
++                            }
++
+                             FramebufferChange *depthFbChange = depthFb->readChangeFromStorage(ext.workloadGraphicsWorker, workload.fbStorage, scratchFbChangePool, Framebuffer::Type::Depth,
+                                 G_IM_FMT_DEPTH, f, depthFb->readHeight, readRowCount, ext.shaderLibrary);
+ 
+diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
+index 9fae0d4..8cac619 100644
+--- a/src/render/rt64_framebuffer_renderer.cpp
++++ b/src/render/rt64_framebuffer_renderer.cpp
+@@ -7,6 +7,7 @@
+ #include "../include/rt64_extended_gbi.h"
+ 
+ #include "common/rt64_elapsed_timer.h"
++#include "common/rt64_fblog.h"
+ #include "common/rt64_math.h"
+ #include "hle/rt64_color_converter.h"
+ #include "gbi/rt64_f3d.h"
+@@ -1435,6 +1436,16 @@ namespace RT64 {
+         const float scissorRatio = static_cast<float>(fbPair.scissorRect.width(false, true)) / static_cast<float>(fbPair.scissorRect.height(false, true));
+         const bool adjustRatio = (abs((scissorRatio / p.aspectRatioSource) - 1.0f) < SimilarityPercentage);
+         const float aspectRatioScale = adjustRatio ? (p.aspectRatioTarget / p.aspectRatioSource) : 1.0f;
++
++        // TEMP-DEBUG (Conker): FbLog, see common/rt64_fblog.h.
++        const bool fbLog = FbLog::frameLogged(p.curWorkload->submissionFrame);
++        const unsigned long long fbLogFrame = (unsigned long long)(p.curWorkload->submissionFrame);
++        if (fbLog) {
++            FbLog::print("[%s %llu] renderer pair %u: scissorRect " RT64_FBLOG_RECT_FMT " ratio %.4f vs source %.4f -> adjustRatio %d aspectRatioScale %.4f, fb %ux%u target %ux%u misalign %.1f",
++                FbLog::threadSide(), fbLogFrame, p.fbPairIndex, RT64_FBLOG_RECT(fbPair.scissorRect), scissorRatio, p.aspectRatioSource, adjustRatio, aspectRatioScale,
++                p.fbWidth, p.fbHeight, p.targetWidth, p.targetHeight, p.horizontalMisalignment);
++        }
++
+         InstanceDrawCall instanceDrawCall;
+         interop::RenderIndices renderIndices;
+         uint32_t globalCallIndex = 0;
+@@ -1488,9 +1499,17 @@ namespace RT64 {
+                 // The call's scissor spans the whole width of the framebuffer pair scissor. Custom origin must not be in use to be able to use the stretched viewport.
+                 const auto &viewport = drawData.rspViewports[proj.transformsIndex];
+                 FixedRect intersectionRect = proj.scissorRect.intersection(viewport.rect(viewportClipRatios));
+-                bool coversWholeWidth = !intersectionRect.isEmpty() && (intersectionRect.ulx <= fbPair.scissorRect.ulx) && (intersectionRect.lrx >= fbPair.scissorRect.lrx);
++                // With no pair scissor (all its triangles culled), compare with the projection's own, as ProjectionProcessor does.
++                const FixedRect &pairScissor = fbPair.scissorRect.isNull() ? proj.scissorRect : fbPair.scissorRect;
++                bool coversWholeWidth = !intersectionRect.isEmpty() && (intersectionRect.ulx <= pairScissor.ulx + CoversWidthViewportSlack) && (intersectionRect.lrx >= pairScissor.lrx - CoversWidthViewportSlack);
+                 bool horizontalRatio = !intersectionRect.isEmpty() && (intersectionRect.width(true, true) > intersectionRect.height(true, true));
+                 bool useWideViewport = (viewportOrigin == G_EX_ORIGIN_NONE) && coversWholeWidth && horizontalRatio;
++                if (fbLog) {
++                    FbLog::print("[%s %llu] renderer pair %u proj %u type %d transforms %u calls %u: projScissor " RT64_FBLOG_RECT_FMT " viewport&scissor " RT64_FBLOG_RECT_FMT " origin %u -> covers %d horizontal %d useWideViewport %d",
++                        FbLog::threadSide(), fbLogFrame, p.fbPairIndex, pr, int(proj.type), proj.transformsIndex, proj.gameCallCount, RT64_FBLOG_RECT(proj.scissorRect), RT64_FBLOG_RECT(intersectionRect),
++                        viewportOrigin, coversWholeWidth, horizontalRatio, useWideViewport);
++                }
++
+                 if (useWideViewport) {
+                     projInvRatioScale = 1.0f;
+                 }
+@@ -1625,6 +1644,7 @@ namespace RT64 {
+ 
+                         float invRatioScale = 1.0f / aspectRatioScale;
+                         float horizontalMisalignment = 0.0f;
++                        bool wideRectScissor = false;
+                         switch (proj.type) {
+                         case Projection::Type::Perspective:
+                         case Projection::Type::Orthographic: {
+@@ -1645,14 +1665,46 @@ namespace RT64 {
+                             // The call's scissor spans the whole width of the framebuffer pair scissor. The rect must not be using extended origins.
+                             const bool regularOrigins = (call.callDesc.rectLeftOrigin == G_EX_ORIGIN_NONE) && (call.callDesc.rectRightOrigin == G_EX_ORIGIN_NONE);
+                             const bool coversScissorWidth = regularOrigins && (call.callDesc.rect.ulx <= fbPair.scissorRect.ulx) && (call.callDesc.rect.lrx >= fbPair.scissorRect.lrx);
+-                            if ((tileCopiesUsed || coversScissorWidth || call.callDesc.rectAspect == G_EX_ASPECT_STRETCH) && (call.callDesc.rectAspect != G_EX_ASPECT_ADJUST)) {
++                            const bool stretchAspect = (call.callDesc.rectAspect == G_EX_ASPECT_STRETCH) || (call.callDesc.rectAspect == G_EX_ASPECT_ZOOM);
++                            if ((tileCopiesUsed || coversScissorWidth || stretchAspect) && (call.callDesc.rectAspect != G_EX_ASPECT_ADJUST)) {
+                                 invRatioScale = 1.0f;
+                             }
+                             else {
+                                 horizontalMisalignment = p.horizontalMisalignment;
+                             }
+ 
++                            // A scissor spanning the frame's width clips the rect at the edges of the widened
++                            // frame, as it does for widened 3D, rather than at the 4:3 area: a rect the game draws
++                            // partly off the 4:3 screen (Conker's sprites near the edges) stays whole.
++                            const FixedRect &callScissor = call.callDesc.scissorRect;
++                            wideRectScissor = (call.callDesc.scissorLeftOrigin == G_EX_ORIGIN_NONE) && (call.callDesc.scissorRightOrigin == G_EX_ORIGIN_NONE) &&
++                                (callScissor.ulx <= fbPair.scissorRect.ulx + CoversWidthSlack) && (callScissor.lrx >= fbPair.scissorRect.lrx - CoversWidthSlack);
++
+                             RenderViewport viewportRect = convertViewportRect(call.callDesc.rect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, horizontalMisalignment, call.callDesc.rectLeftOrigin, call.callDesc.rectRightOrigin);
++
++                            // An untextured rect reaching one side of the frame (but not both: those are stretched above) continues to that
++                            // side of the widened frame (Conker's iris transitions draw their black this way).
++                            const bool reachesLeft = (call.callDesc.rect.ulx <= fbPair.scissorRect.ulx + CoversWidthSlack);
++                            const bool reachesRight = (call.callDesc.rect.lrx >= fbPair.scissorRect.lrx - CoversWidthSlack);
++                            if (regularOrigins && (invRatioScale != 1.0f) && (call.callDesc.tileCount == 0) && (reachesLeft != reachesRight)) {
++                                const RenderViewport wideFrame = convertViewportRect(fbPair.scissorRect, p.resolutionScale, p.fbWidth, 1.0f, extOriginPercentage, 0.0f, G_EX_ORIGIN_NONE, G_EX_ORIGIN_NONE);
++                                if (reachesLeft) {
++                                    const float right = viewportRect.x + viewportRect.width;
++                                    viewportRect.x = wideFrame.x;
++                                    viewportRect.width = right - wideFrame.x;
++                                }
++                                else {
++                                    viewportRect.width = (wideFrame.x + wideFrame.width) - viewportRect.x;
++                                }
++                            }
++
++                            // Zoomed: stretched to the width above, and scaled as much vertically about the middle of the scissor.
++                            if ((call.callDesc.rectAspect == G_EX_ASPECT_ZOOM) && !call.callDesc.scissorRect.isNull()) {
++                                const float middle = ((call.callDesc.scissorRect.uly + call.callDesc.scissorRect.lry) / 8.0f) * p.resolutionScale.y;
++                                viewportRect.y = middle + (viewportRect.y - middle) * aspectRatioScale;
++                                viewportRect.height *= aspectRatioScale;
++                            }
++
+                             triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
+                             triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
+                             triangles.screenOffset.y = halfPixelOffset.y + (halfViewportSize.y - (viewportRect.y + viewportRect.height / 2.0f)) / halfViewportSize.y;
+@@ -1676,7 +1728,12 @@ namespace RT64 {
+                             break;
+                         }
+ 
+-                        triangles.scissor = convertFixedRect(call.callDesc.scissorRect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, int32_t(horizontalMisalignment), call.callDesc.scissorLeftOrigin, call.callDesc.scissorRightOrigin);
++                        if (wideRectScissor) {
++                            triangles.scissor = convertFixedRect(call.callDesc.scissorRect, p.resolutionScale, p.fbWidth, 1.0f, extOriginPercentage, 0, call.callDesc.scissorLeftOrigin, call.callDesc.scissorRightOrigin);
++                        }
++                        else {
++                            triangles.scissor = convertFixedRect(call.callDesc.scissorRect, p.resolutionScale, p.fbWidth, invRatioScale, extOriginPercentage, int32_t(horizontalMisalignment), call.callDesc.scissorLeftOrigin, call.callDesc.scissorRightOrigin);
++                        }
+ 
+                         bool usesViewport = (proj.type == Projection::Type::Perspective) || (proj.type == Projection::Type::Orthographic);
+                         if (usesViewport) {
+diff --git a/src/render/rt64_projection_processor.cpp b/src/render/rt64_projection_processor.cpp
+index e842dcc..c0e4b44 100644
+--- a/src/render/rt64_projection_processor.cpp
++++ b/src/render/rt64_projection_processor.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "rt64_projection_processor.h"
+ 
++#include "common/rt64_fblog.h"
+ #include "common/rt64_math.h"
+ #include "hle/rt64_workload_queue.h"
+ 
+@@ -92,13 +93,26 @@ namespace RT64 {
+                 }
+ 
+                 if (!intersectionRect.isEmpty()) {
+-                    bool coversWholeWidth = (intersectionRect.ulx <= fbPair.scissorRect.ulx) && (intersectionRect.lrx >= fbPair.scissorRect.lrx);
++                    // Same slack as FramebufferRenderer's wide viewport check (CoversWidthViewportSlack): the two must agree. A pair whose triangles were
++                    // all culled has no scissor; compare with the projection's own then, or this projection's transforms, which
++                    // another pair that did draw may share, would lose their widening (Conker's hub, near the naughty/nice sign).
++                    const FixedRect &pairScissor = fbPair.scissorRect.isNull() ? proj.scissorRect : fbPair.scissorRect;
++                    bool coversWholeWidth = (intersectionRect.ulx <= pairScissor.ulx + CoversWidthViewportSlack) && (intersectionRect.lrx >= pairScissor.lrx - CoversWidthViewportSlack);
+                     bool horizontalRatio = (intersectionRect.width(true, true) > intersectionRect.height(true, true));
+                     adjustAspectRatio = (viewportOrigin == G_EX_ORIGIN_NONE) && coversWholeWidth && horizontalRatio;
+                 }
+             }
+  
+             float projRatioScale = adjustAspectRatio ? (1.0f / p.aspectRatioScale) : 1.0f;
++
++            // TEMP-DEBUG (Conker): FbLog, see common/rt64_fblog.h. Transforms shared by projections of several pairs are
++            // adjusted by whichever of them comes last here.
++            if (FbLog::frameLogged(workload.submissionFrame)) {
++                FbLog::print("[proj %llu] scene %zu pair %u proj %u type %d transforms %u aspectMode %u: projScissor " RT64_FBLOG_RECT_FMT " pairScissor " RT64_FBLOG_RECT_FMT " -> adjustAspectRatio %d interpolated %d",
++                    (unsigned long long)(workload.submissionFrame), sceneIndex, sceneProj.fbPairIndex, sceneProj.projectionIndex, int(proj.type), proj.transformsIndex, curProjGroup.aspectMode,
++                    RT64_FBLOG_RECT(proj.scissorRect), RT64_FBLOG_RECT(fbPair.scissorRect), adjustAspectRatio, (rigidBody != nullptr));
++            }
++
+             interop::float4x4 &viewMatrix = drawData.modViewTransforms[proj.transformsIndex];
+             interop::float4x4 &projMatrix = drawData.modProjTransforms[proj.transformsIndex];
+             interop::float4x4 &viewProjMatrix = drawData.modViewProjTransforms[proj.transformsIndex];
+@@ -121,8 +135,20 @@ namespace RT64 {
+                 const interop::float4x4 curProjTransform = projMatrix;
+                 interop::float4x4 adjustedPrevProj = *prevProjMatrix;
+                 adjustProjectionMatrix(adjustedPrevProj, projRatioScale);
+-                viewMatrix = rigidBody->lerp(p.curFrameWeight, *prevViewMatrix, curViewTransform, true);
+-                prevViewTransform = rigidBody->lerp(p.prevFrameWeight, *prevViewMatrix, curViewTransform, true);
++                if (rigidBody->lerpDecompose) {
++                    viewMatrix = rigidBody->lerp(p.curFrameWeight, *prevViewMatrix, curViewTransform, true);
++                    prevViewTransform = rigidBody->lerp(p.prevFrameWeight, *prevViewMatrix, curViewTransform, true);
++                }
++                else {
++                    // Interpolate the camera, not the view: a view matrix's translation is the world's origin seen
++                    // from the camera, so lerping it while the camera turns moves the in-between camera off its path,
++                    // by more the further the camera is from the origin. The world then shakes around what the camera
++                    // follows at the game's frame rate (Conker, most when the camera is close and turning quickly).
++                    const interop::float4x4 prevCamera = hlslpp::inverse(*prevViewMatrix);
++                    const interop::float4x4 curCamera = hlslpp::inverse(curViewTransform);
++                    viewMatrix = hlslpp::inverse(rigidBody->lerp(p.curFrameWeight, prevCamera, curCamera, true));
++                    prevViewTransform = hlslpp::inverse(rigidBody->lerp(p.prevFrameWeight, prevCamera, curCamera, true));
++                }
+ 
+                 // We only interpolate the projection if the view matrix has been interpolated.
+                 const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;

@@ -1,0 +1,192 @@
+diff --git a/src/analysis.cpp b/src/analysis.cpp
+index 9eaaa30..145d4ea 100644
+--- a/src/analysis.cpp
++++ b/src/analysis.cpp
+@@ -151,8 +151,9 @@ bool analyze_instruction(const rabbitizer::InstructionCpu& instr, const N64Recom
+                 return false;
+             }
+             if (((int16_t)imm) < 0) {
+-                fmt::print(stderr, "Negative offset for sw to stack: {}\n", (int16_t)imm);
+-                return false;
++                // Hand-written asm may touch the stack below $sp (e.g. restoring registers after
++                // popping the frame). Such slots are not tracked for jump table detection.
++                break;
+             }
+             size_t stack_offset = imm / 4;
+             if (stack_offset >= stack_states.size()) {
+@@ -171,8 +172,9 @@ bool analyze_instruction(const rabbitizer::InstructionCpu& instr, const N64Recom
+                 return false;
+             }
+             if (((int16_t)imm) < 0) {
+-                fmt::print(stderr, "Negative offset for lw from stack: {}\n", (int16_t)imm);
+-                return false;
++                // See the matching case for sw above.
++                reg_states[rt] = temp;
++                break;
+             }
+             size_t stack_offset = imm / 4;
+             if (stack_offset >= stack_states.size()) {
+@@ -314,14 +316,34 @@ bool N64Recomp::analyze_function(const N64Recomp::Context& context, const N64Rec
+             end_address = stats.jump_tables[i + 1].vram;
+         }
+ 
+-        // TODO this assumes that the jump table is in the same section as the function itself
+-        cur_jtbl.rom = cur_jtbl.vram + func.rom - func.vram;
+-        cur_jtbl.section_index = func.section_index;
++        // Find the section holding the jump table. It is usually the function's own section, but games whose
++        // code runs at TLB-mapped addresses (e.g. Conker) keep rodata in a separate KSEG0 data section.
++        uint16_t jtbl_section_index = func.section_index;
++        {
++            const Section& own = context.sections[func.section_index];
++            if (cur_jtbl.vram < own.ram_addr || cur_jtbl.vram >= own.ram_addr + own.size) {
++                for (size_t s = 0; s < context.sections.size(); s++) {
++                    const Section& cand = context.sections[s];
++                    if (cand.rom_addr != (uint32_t)-1 && cur_jtbl.vram >= cand.ram_addr && cur_jtbl.vram < cand.ram_addr + cand.size) {
++                        jtbl_section_index = (uint16_t)s;
++                        break;
++                    }
++                }
++            }
++        }
++        const Section& jtbl_section = context.sections[jtbl_section_index];
++        if (cur_jtbl.vram < jtbl_section.ram_addr || cur_jtbl.vram >= jtbl_section.ram_addr + jtbl_section.size) {
++            fmt::print("No section contains jump table at 0x{:08X} for instruction at 0x{:08X}\n", cur_jtbl.vram, cur_jtbl.jr_vram);
++            return false;
++        }
++        end_address = std::min(end_address, jtbl_section.ram_addr + jtbl_section.size);
++
++        cur_jtbl.rom = cur_jtbl.vram - jtbl_section.ram_addr + jtbl_section.rom_addr;
++        cur_jtbl.section_index = jtbl_section_index;
+ 
+         while (vram < end_address) {
+             // Retrieve the current entry of the jump table
+-            // TODO same as above
+-            uint32_t rom_addr = vram + func.rom - func.vram;
++            uint32_t rom_addr = vram - jtbl_section.ram_addr + jtbl_section.rom_addr;
+             uint32_t jtbl_word = byteswap(*reinterpret_cast<const uint32_t*>(&context.rom[rom_addr]));
+ 
+             if (cur_jtbl.got_offset.has_value() && got_ram_addr.has_value()) {
+@@ -340,8 +362,12 @@ bool N64Recomp::analyze_function(const N64Recomp::Context& context, const N64Rec
+         }
+ 
+         if (cur_jtbl.entries.size() == 0) {
+-            fmt::print("Failed to determine size of jump table at 0x{:08X} for instruction at 0x{:08X}\n", cur_jtbl.vram, cur_jtbl.jr_vram);
+-            return false;
++            // Not a jump table after all: hand-written asm can also `jr` through a function pointer loaded from a
++            // table of structs. Drop the candidate so the jr is emitted as an indirect tail call.
++            fmt::print("[Info] No jump table at 0x{:08X} for instruction at 0x{:08X}, treating it as an indirect jump\n", cur_jtbl.vram, cur_jtbl.jr_vram);
++            stats.jump_tables.erase(stats.jump_tables.begin() + i);
++            i--;
++            continue;
+         }
+ 
+         //fmt::print("Jtbl at 0x{:08X} (rom 0x{:08X}) with {} entries used by instr at 0x{:08X}\n", cur_jtbl.vram, cur_jtbl.rom, cur_jtbl.entries.size(), cur_jtbl.jr_vram);
+diff --git a/src/cgenerator.cpp b/src/cgenerator.cpp
+index 94f85c5..9e4d1e5 100644
+--- a/src/cgenerator.cpp
++++ b/src/cgenerator.cpp
+@@ -523,18 +523,21 @@ void N64Recomp::CGenerator::emit_muldiv(InstrId instr_id, int reg1, int reg2) co
+         case InstrId::cpu_dmultu:
+             fmt::print(output_file, "DMULTU(U64({}), U64({}), &lo, &hi);\n", gpr_to_string(reg1), gpr_to_string(reg2));
+             break;
++        // Division by zero doesn't trap on the VR4300: the quotient is -1 (1 for a negative
++        // signed dividend) and the remainder is the dividend. Hand-written code can divide by
++        // zero without checking (e.g. Conker's func_150A3CBC); on the host it would trap.
+         case InstrId::cpu_div:
+             // Cast to 64-bits before division to prevent artihmetic exception for s32(0x80000000) / -1
+-            fmt::print(output_file, "lo = S32(S64(S32({0})) / S64(S32({1}))); hi = S32(S64(S32({0})) % S64(S32({1})));\n", gpr_to_string(reg1), gpr_to_string(reg2));
++            fmt::print(output_file, "if (S32({1}) == 0) {{ lo = S32({0}) >= 0 ? -1 : 1; hi = S32({0}); }} else {{ lo = S32(S64(S32({0})) / S64(S32({1}))); hi = S32(S64(S32({0})) % S64(S32({1}))); }}\n", gpr_to_string(reg1), gpr_to_string(reg2));
+             break;
+         case InstrId::cpu_ddiv:
+-            fmt::print(output_file, "DDIV(S64({}), S64({}), &lo, &hi);\n", gpr_to_string(reg1), gpr_to_string(reg2));
++            fmt::print(output_file, "if (S64({1}) == 0) {{ lo = S64({0}) >= 0 ? -1 : 1; hi = {0}; }} else DDIV(S64({0}), S64({1}), &lo, &hi);\n", gpr_to_string(reg1), gpr_to_string(reg2));
+             break;
+         case InstrId::cpu_divu:
+-            fmt::print(output_file, "lo = S32(U32({0}) / U32({1})); hi = S32(U32({0}) % U32({1}));\n", gpr_to_string(reg1), gpr_to_string(reg2));
++            fmt::print(output_file, "if (U32({1}) == 0) {{ lo = S32(0xFFFFFFFF); hi = S32({0}); }} else {{ lo = S32(U32({0}) / U32({1})); hi = S32(U32({0}) % U32({1})); }}\n", gpr_to_string(reg1), gpr_to_string(reg2));
+             break;
+         case InstrId::cpu_ddivu:
+-            fmt::print(output_file, "DDIVU(U64({}), U64({}), &lo, &hi);\n", gpr_to_string(reg1), gpr_to_string(reg2));
++            fmt::print(output_file, "if (U64({1}) == 0) {{ lo = -1; hi = {0}; }} else DDIVU(U64({0}), U64({1}), &lo, &hi);\n", gpr_to_string(reg1), gpr_to_string(reg2));
+             break;
+         default:
+             assert(false);
+diff --git a/src/config.cpp b/src/config.cpp
+index 1066aff..5183454 100644
+--- a/src/config.cpp
++++ b/src/config.cpp
+@@ -595,6 +595,10 @@ bool N64Recomp::Context::from_symbol_file(const std::filesystem::path& symbol_fi
+                         std::optional<std::string> name = func_el["name"].template value<std::string>();
+                         std::optional<uint32_t> vram_addr = func_el["vram"].template value<uint32_t>();
+                         std::optional<uint32_t> func_size_ = func_el["size"].template value<uint32_t>();
++                        // Optional: a function whose vram is an alias outside its section's
++                        // (like an entrypoint in KSEG0 for code linked at a TLB address)
++                        // gives its rom address directly.
++                        std::optional<uint32_t> rom_addr = func_el["rom"].template value<uint32_t>();
+ 
+                         if (!name.has_value() || !vram_addr.has_value() || !func_size_.has_value()) {
+                             throw toml::parse_error("Function symbol entry is missing required field(s)", func_el.source());
+@@ -605,7 +609,7 @@ bool N64Recomp::Context::from_symbol_file(const std::filesystem::path& symbol_fi
+                         Function cur_func{};
+                         cur_func.name = name.value();
+                         cur_func.vram = vram_addr.value();
+-                        cur_func.rom = cur_func.vram - section.ram_addr + section.rom_addr;
++                        cur_func.rom = rom_addr.has_value() ? rom_addr.value() : cur_func.vram - section.ram_addr + section.rom_addr;
+                         cur_func.section_index = section_index;
+ 
+                         if (cur_func.vram & 0b11) {
+diff --git a/src/main.cpp b/src/main.cpp
+index 669c4a1..adbcb9f 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -732,6 +732,7 @@ int main(int argc, char** argv) {
+     std::vector<size_t> export_function_indices{};
+ 
+     bool failed_strict_mode = false;
++    size_t failed_function_count = 0;
+ 
+     //#pragma omp parallel for
+     for (size_t i = 0; i < context.functions.size(); i++) {
+@@ -783,7 +784,11 @@ int main(int argc, char** argv) {
+             }
+             if (result == false) {
+                 fmt::print(stderr, "Error recompiling {}\n", func.name);
+-                std::exit(EXIT_FAILURE);
++                // N64RECOMP_KEEP_GOING=1 reports every failing function in one run (the output is then unusable).
++                if (std::getenv("N64RECOMP_KEEP_GOING") == nullptr) {
++                    std::exit(EXIT_FAILURE);
++                }
++                failed_function_count++;
+             }
+         } else if (func.reimplemented) {
+             fmt::print(func_header_file,
+@@ -791,6 +796,10 @@ int main(int argc, char** argv) {
+         }
+     }
+ 
++    if (failed_function_count != 0) {
++        exit_failure(fmt::format("{} functions failed to recompile\n", failed_function_count));
++    }
++
+     if (failed_strict_mode) {
+         if (config.single_file_output || config.functions_per_output_file > 1) {
+             current_output_file.close();
+diff --git a/src/recompilation.cpp b/src/recompilation.cpp
+index c228433..57fbab7 100644
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -791,7 +791,13 @@ bool recompile_function_impl(GeneratorType& generator, const N64Recomp::Context&
+ 
+             // If this is a branch or a direct jump, add it to the local label list
+             if (instr.isBranch() || instr.getUniqueId() == rabbitizer::InstrId::UniqueId::cpu_j) {
+-                branch_labels.insert((uint32_t)instr.getBranchVramGeneric());
++                // Only targets inside this function become labels. Targets outside it are tail calls;
++                // recording them here would shift the labels that follow (one label is emitted per
++                // instruction), e.g. when hand-written asm branches back to code before the function.
++                uint32_t target = (uint32_t)instr.getBranchVramGeneric();
++                if (target >= func.vram && target < func.vram + func.words.size() * sizeof(func.words[0])) {
++                    branch_labels.insert(target);
++                }
+             }
+ 
+             // Advance the vram address by the size of one instruction

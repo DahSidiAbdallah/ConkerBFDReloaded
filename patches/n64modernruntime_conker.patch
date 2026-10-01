@@ -1,0 +1,159 @@
+diff --git a/librecomp/src/config.cpp b/librecomp/src/config.cpp
+index 6bc03fd..4403609 100644
+--- a/librecomp/src/config.cpp
++++ b/librecomp/src/config.cpp
+@@ -581,6 +581,16 @@ bool Config::is_dirty() const {
+ 
+ void Config::add_option_change_callback(const std::string& option_id, on_option_change_callback callback) {
+     size_t option_index = schema.options_by_id[option_id];
++    // Conker: a second callback for an option runs after the first instead of replacing it.
++    auto existing = option_change_callbacks.find(option_index);
++    if (existing != option_change_callbacks.end() && existing->second) {
++        on_option_change_callback first = existing->second;
++        existing->second = [first, callback](ConfigValueVariant cur_value, ConfigValueVariant prev_value, OptionChangeContext change_context) {
++            first(cur_value, prev_value, change_context);
++            callback(cur_value, prev_value, change_context);
++        };
++        return;
++    }
+     option_change_callbacks[option_index] = callback;
+ }
+ 
+diff --git a/ultramodern/include/ultramodern/ultramodern.hpp b/ultramodern/include/ultramodern/ultramodern.hpp
+index d04ad78..abcb46a 100644
+--- a/ultramodern/include/ultramodern/ultramodern.hpp
++++ b/ultramodern/include/ultramodern/ultramodern.hpp
+@@ -105,10 +105,18 @@ bool is_game_thread();
+ void submit_rsp_task(RDRAM_ARG PTR(OSTask) task);
+ void send_si_message();
+ uint32_t get_speed_multiplier();
++// Runs the game this many times faster (fast-forward); its clock stays continuous.
++void set_speed_multiplier(uint32_t multiplier);
++// While set, the game's frames aren't drawn: the screen keeps showing what it showed.
++void set_screen_blanked(bool blanked);
+ 
+ // Time
+ std::chrono::high_resolution_clock::time_point get_start();
+ std::chrono::high_resolution_clock::duration time_since_start();
++// The game's own time, which runs faster while fast-forwarding, and the real time a
++// moment of it falls on.
++std::chrono::high_resolution_clock::duration game_time_since_start();
++std::chrono::high_resolution_clock::time_point game_time_to_wall(std::chrono::high_resolution_clock::duration game_time);
+ void measure_input_latency();
+ void sleep_milliseconds(uint32_t millis);
+ void sleep_until(const std::chrono::high_resolution_clock::time_point& time_point);
+diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
+index 17d7a47..ff21240 100644
+--- a/ultramodern/src/events.cpp
++++ b/ultramodern/src/events.cpp
+@@ -54,6 +54,13 @@ struct ViState {
+ #define VI_STATE_BLACK 0x20
+ #define VI_STATE_REPEATLINE 0x40
+ 
++// Set by the program to leave the game's frames undrawn (the screen keeps what it showed).
++static std::atomic_bool screen_blanked = false;
++
++void ultramodern::set_screen_blanked(bool blanked) {
++    screen_blanked = blanked;
++}
++
+ static struct {
+     struct {
+         std::thread thread;
+@@ -195,7 +202,7 @@ void vi_thread_func() {
+ 
+     while (!exited) {
+         // Determine the next VI time (more accurate than adding 16ms each VI interrupt)
+-        auto next = ultramodern::get_start() + (total_vis * 1000000us) / (60 * ultramodern::get_speed_multiplier());
++        auto next = ultramodern::game_time_to_wall((total_vis * 1000000us) / 60);
+         //if (next > std::chrono::high_resolution_clock::now()) {
+         //    printf("Sleeping for %" PRIu64 " us to get from %" PRIu64 " us to %" PRIu64 " us \n",
+         //        (next - std::chrono::high_resolution_clock::now()) / 1us,
+@@ -210,9 +217,9 @@ void vi_thread_func() {
+             next = std::chrono::high_resolution_clock::now();
+         }
+         ultramodern::sleep_until(next);
+-        auto time_now = ultramodern::time_since_start();
++        auto time_now = ultramodern::game_time_since_start();
+         // Calculate how many VIs have passed
+-        uint64_t new_total_vis = (time_now * (60 * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
++        uint64_t new_total_vis = (time_now * 60 / 1000ms) + 1;
+         if (new_total_vis > total_vis + 1) {
+             //printf("Skipped % " PRId64 " frames in VI interupt thread!\n", new_total_vis - total_vis - 1);
+         }
+@@ -375,7 +382,9 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+                 ultramodern::extensions::on_displaylist_submitted(displaylist);
+ 
+                 [[maybe_unused]] auto renderer_start = std::chrono::high_resolution_clock::now();
+-                renderer_context->send_dl(&task_action->task);
++                if (!screen_blanked) {
++                    renderer_context->send_dl(&task_action->task);
++                }
+                 [[maybe_unused]] auto renderer_end = std::chrono::high_resolution_clock::now();
+ 
+                 dp_complete();
+diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
+index ee26c45..94413ac 100644
+--- a/ultramodern/src/timer.cpp
++++ b/ultramodern/src/timer.cpp
+@@ -1,3 +1,4 @@
++#include <mutex>
+ #include <thread>
+ #include <variant>
+ #include <set>
+@@ -16,9 +17,14 @@ static std::chrono::high_resolution_clock::time_point start_time = std::chrono::
+ // Offset of the duration since program start used to calculate the value for osGetTime. 
+ static int64_t ostime_offset = 0;
+ // Game speed multiplier (1 means no speedup)
+-constexpr uint32_t speed_multiplier = 1;
++static uint32_t speed_multiplier = 1;
++// The game's clock runs speed_multiplier times as fast as real time. It stays continuous
++// when the multiplier changes: game time = base_game + (now - base_wall) * multiplier.
++static std::mutex game_clock_mutex;
++static std::chrono::high_resolution_clock::time_point base_wall = start_time;
++static std::chrono::high_resolution_clock::duration base_game{0};
+ // N64 CPU counter ticks per millisecond
+-constexpr uint32_t counter_per_ms = 46'875 * speed_multiplier;
++constexpr uint32_t counter_per_ms = 46'875;
+ 
+ struct OSTimer {
+     PTR(OSTimer) unused1;
+@@ -59,11 +65,11 @@ std::chrono::microseconds ticks_to_duration(uint64_t ticks) {
+ }
+ 
+ std::chrono::high_resolution_clock::time_point ticks_to_timepoint(uint64_t ticks) {
+-    return start_time + ticks_to_duration(ticks);
++    return ultramodern::game_time_to_wall(ticks_to_duration(ticks));
+ }
+ 
+ uint64_t time_now() {
+-    return duration_to_ticks(std::chrono::high_resolution_clock::now() - start_time);
++    return duration_to_ticks(ultramodern::game_time_since_start());
+ }
+ 
+ void timer_thread(RDRAM_ARG1) {
+@@ -149,6 +155,24 @@ uint32_t ultramodern::get_speed_multiplier() {
+     return speed_multiplier;
+ }
+ 
++void ultramodern::set_speed_multiplier(uint32_t multiplier) {
++    std::lock_guard lock{ game_clock_mutex };
++    auto now = std::chrono::high_resolution_clock::now();
++    base_game += (now - base_wall) * speed_multiplier;
++    base_wall = now;
++    speed_multiplier = multiplier > 0 ? multiplier : 1;
++}
++
++std::chrono::high_resolution_clock::duration ultramodern::game_time_since_start() {
++    std::lock_guard lock{ game_clock_mutex };
++    return base_game + (std::chrono::high_resolution_clock::now() - base_wall) * speed_multiplier;
++}
++
++std::chrono::high_resolution_clock::time_point ultramodern::game_time_to_wall(std::chrono::high_resolution_clock::duration game_time) {
++    std::lock_guard lock{ game_clock_mutex };
++    return base_wall + (game_time - base_game) / speed_multiplier;
++}
++
+ std::chrono::high_resolution_clock::time_point ultramodern::get_start() {
+     return start_time;
+ }

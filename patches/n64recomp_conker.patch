@@ -1,0 +1,156 @@
+diff --git a/include/recompiler/generator.h b/include/recompiler/generator.h
+index 145bcd0..2a0a3f9 100644
+--- a/include/recompiler/generator.h
++++ b/include/recompiler/generator.h
+@@ -34,6 +34,8 @@ namespace N64Recomp {
+         virtual void emit_function_end() const = 0;
+         virtual void emit_function_call_lookup(uint32_t addr) const = 0;
+         virtual void emit_function_call_by_register(int reg) const = 0;
++        virtual void emit_save_jump_register(int reg, uint32_t vram) const = 0;
++        virtual void emit_function_call_by_saved_register(uint32_t vram) const = 0;
+         // target_section_offset can each be deduced from symbol_index if the full context is available,
+         // but for live recompilation the reference symbol list is unavailable so it's still provided.
+         virtual void emit_function_call_reference_symbol(const Context& context, uint16_t section_index, size_t symbol_index, uint32_t target_section_offset) const = 0;
+@@ -73,6 +75,8 @@ namespace N64Recomp {
+         void emit_function_end() const final;
+         void emit_function_call_lookup(uint32_t addr) const final;
+         void emit_function_call_by_register(int reg) const final;
++        void emit_save_jump_register(int reg, uint32_t vram) const final;
++        void emit_function_call_by_saved_register(uint32_t vram) const final;
+         void emit_function_call_reference_symbol(const Context& context, uint16_t section_index, size_t symbol_index, uint32_t target_section_offset) const final;
+         void emit_function_call(const Context& context, size_t function_index) const final;
+         void emit_named_function_call(const std::string& function_name) const final;
+diff --git a/include/recompiler/live_recompiler.h b/include/recompiler/live_recompiler.h
+index d155b83..7498734 100644
+--- a/include/recompiler/live_recompiler.h
++++ b/include/recompiler/live_recompiler.h
+@@ -105,6 +105,9 @@ namespace N64Recomp {
+         void emit_function_end() const final;
+         void emit_function_call_lookup(uint32_t addr) const final;
+         void emit_function_call_by_register(int reg) const final;
++        // Not supported by the live recompiler; the C generator handles this case.
++        void emit_save_jump_register(int reg, uint32_t vram) const final { (void)reg; (void)vram; }
++        void emit_function_call_by_saved_register(uint32_t vram) const final { (void)vram; }
+         void emit_function_call_reference_symbol(const Context& context, uint16_t section_index, size_t symbol_index, uint32_t target_section_offset) const final;
+         void emit_function_call(const Context& context, size_t function_index) const final;
+         void emit_named_function_call(const std::string& function_name) const final;
+diff --git a/src/cgenerator.cpp b/src/cgenerator.cpp
+index 9e4d1e5..df8b819 100644
+--- a/src/cgenerator.cpp
++++ b/src/cgenerator.cpp
+@@ -86,6 +86,14 @@ static std::string gpr_to_string(int gpr_index) {
+ }
+ 
+ static std::string fpr_to_string(int fpr_index) {
++    // Odd registers must go through f_odd for single-precision math too, the
++    // same storage lwc1/mtc1/mfc1/swc1 use (fpr_u32l_to_string). With FR=0 an
++    // odd register is the upper half of the even one below it; using ctx->fN
++    // here made hand-written code (Conker's renderer) compute with values it
++    // never loaded. With FR=1 f_odd points at fN.u32l, so this is identical.
++    if (fpr_index & 1) {
++        return fmt::format("(*(float*)&ctx->f_odd[({} - 1) * 2])", fpr_index);
++    }
+     return fmt::format("ctx->f{}.fl", fpr_index);
+ }
+ 
+@@ -414,6 +422,14 @@ void N64Recomp::CGenerator::emit_function_call_by_register(int reg) const {
+     fmt::print(output_file, "LOOKUP_FUNC({})(rdram, ctx);\n", gpr_to_string(reg));
+ }
+ 
++void N64Recomp::CGenerator::emit_save_jump_register(int reg, uint32_t vram) const {
++    fmt::print(output_file, "gpr jr_target_{:08X} = {};\n", vram, gpr_to_string(reg));
++}
++
++void N64Recomp::CGenerator::emit_function_call_by_saved_register(uint32_t vram) const {
++    fmt::print(output_file, "LOOKUP_FUNC(jr_target_{:08X})(rdram, ctx);\n", vram);
++}
++
+ void N64Recomp::CGenerator::emit_function_call_reference_symbol(const Context& context, uint16_t section_index, size_t symbol_index, uint32_t target_section_offset) const {
+     (void)target_section_offset;
+     const N64Recomp::ReferenceSymbol& sym = context.get_reference_symbol(section_index, symbol_index);
+diff --git a/src/recompilation.cpp b/src/recompilation.cpp
+index 57fbab7..822ceee 100644
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -250,11 +250,28 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+     };
+ 
+     auto print_func_call_by_register = [&](int reg) {
++        // The jump target is read before the delay slot runs. If the delay
++        // slot overwrites the jump register (e.g. Conker 0x150AB984:
++        // `jr $t0` / `lui $t0, ...`), save the target first.
++        bool delay_slot_clobbers = false;
++        if (instr_index + 1 < instructions.size()) {
++            const auto& ds = instructions[instr_index + 1];
++            delay_slot_clobbers = (ds.modifiesRt() && (int)ds.GetO32_rt() == reg) ||
++                                  (ds.modifiesRd() && (int)ds.GetO32_rd() == reg);
++        }
++        if (delay_slot_clobbers) {
++            print_indent();
++            generator.emit_save_jump_register(reg, instr_vram);
++        }
+         if (!process_delay_slot(false)) {
+             return false;
+         }
+         print_indent();
+-        generator.emit_function_call_by_register(reg);
++        if (delay_slot_clobbers) {
++            generator.emit_function_call_by_saved_register(instr_vram);
++        } else {
++            generator.emit_function_call_by_register(reg);
++        }
+         print_link_branch();
+         return true;
+     };
+@@ -424,8 +441,20 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+                 generator.emit_cop0_status_read(rt);
+                 break;
+             default:
+-                fmt::print(stderr, "Unhandled cop0 register in mfc0: {}\n", (int)reg);
+-                return false;
++                // Registers other than Status (e.g. Index/EntryHi/EntryLo/PageMask,
++                // used for manual TLB management) aren't tracked -- reads of them
++                // are given a placeholder value of 0 rather than failing analysis
++                // of the whole function. This is safe for games whose TLB setup is
++                // handled statically by the runtime's address translation instead
++                // of needing real TLB register state (see e.g. Conker's
++                // conker_translate_addr in recomp.h).
++                print_indent();
++                if (rt != 0) {
++                    fmt::print(output_file, "{}{} = 0; // unhandled cop0 register {} in mfc0, treated as read-as-zero\n", ctx_gpr_prefix(rt), rt, (int)reg);
++                } else {
++                    fmt::print(output_file, "; // unhandled cop0 register {} in mfc0 (target $zero, no-op)\n", (int)reg);
++                }
++                break;
+             }
+             break;
+         }
+@@ -438,11 +467,26 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+                 generator.emit_cop0_status_write(rt);
+                 break;
+             default:
+-                fmt::print(stderr, "Unhandled cop0 register in mtc0: {}\n", (int)reg);
+-                return false;
++                // See matching comment in mfc0 above: writes to untracked cop0
++                // registers are safe to discard rather than failing the function.
++                print_indent();
++                fmt::print(output_file, "; // unhandled cop0 register {} in mtc0, write ignored\n", (int)reg);
++                break;
+             }
+             break;
+         }
++    case InstrId::cpu_tlbwi:
++    case InstrId::cpu_tlbwr:
++    case InstrId::cpu_tlbr:
++    case InstrId::cpu_tlbp:
++    case InstrId::cpu_cache:
++        // Real TLB/cache management is unnecessary when address translation for
++        // any non-standard VMA ranges a game uses is handled statically (see
++        // comment on cpu_mfc0/cpu_mtc0 above) -- safe to no-op rather than
++        // failing as an unhandled instruction.
++        print_indent();
++        fmt::print(output_file, "; // {} (TLB/cache management) ignored, unnecessary with static address translation\n", instr.getOpcodeName());
++        break;
+     // Arithmetic
+     case InstrId::cpu_add:
+     case InstrId::cpu_addu:

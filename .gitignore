@@ -1,0 +1,30 @@
+# Never upload: the ROM and anything made from it.
+*.z64
+*.n64
+*.v64
+recomp/out/
+recomp/out_new/
+recomp/*.bin
+recomp/*.elf
+recomp/translate.log
+recomp/.translate.toml
+
+# Downloaded / built separately (see README).
+conker/
+N64Recomp/
+deps/
+host/build/
+
+# Local only.
+.venv/
+.claude/
+screenshots/
+__pycache__/
+*.log
+
+# Texture pack work: made from the game's and other people's pictures (never upload).
+icons_work/
+tools/textures/rice_scan
+
+# Linux build (tools/build_linux.sh).
+build-linux/

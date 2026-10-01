@@ -1,0 +1,75 @@
+diff --git a/recompui/include/recompui/renderer.h b/recompui/include/recompui/renderer.h
+index 33f79ab..6cc3bb3 100644
+--- a/recompui/include/recompui/renderer.h
++++ b/recompui/include/recompui/renderer.h
+@@ -2,6 +2,7 @@
+ 
+ #include <unordered_set>
+ #include <filesystem>
++#include <functional>
+ 
+ #include "common/rt64_user_configuration.h"
+ #include "ultramodern/renderer_context.hpp"
+@@ -45,6 +46,11 @@ namespace recompui {
+ 
+         std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(uint8_t *rdram, ultramodern::renderer::WindowHandle window_handle, ultramodern::renderer::PresentationMode presentation_mode, bool developer_mode);
+ 
++        // Lets the game adjust RT64's user configuration after the graphics config is applied
++        // (settings the Graphics tab doesn't have), and re-applies it when they change.
++        void set_user_config_extension(std::function<void(RT64::UserConfiguration&)> extension);
++        void refresh_user_config_extension();
++
+         RT64::UserConfiguration::Antialiasing RT64MaxMSAA();
+         bool RT64SamplePositionsSupported();
+         bool RT64HighPrecisionFBEnabled();
+diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
+index a7954c7..fb286c7 100644
+--- a/recompui/src/renderer/rt64_render_context.cpp
++++ b/recompui/src/renderer/rt64_render_context.cpp
+@@ -2,6 +2,7 @@
+ #include <cstring>
+ #include <variant>
+ #include <algorithm>
++#include <atomic>
+ 
+ #include "hle/rt64_application.h"
+ #include "rt64_render_hooks.h"
+@@ -138,6 +139,18 @@ RT64::EnhancementConfiguration::Presentation::Mode to_rt64(ultramodern::renderer
+     }
+ }
+ 
++static std::function<void(RT64::UserConfiguration&)> user_config_extension;
++static std::atomic<bool> user_config_extension_changed{ false };
++
++void recompui::renderer::set_user_config_extension(std::function<void(RT64::UserConfiguration&)> extension) {
++    user_config_extension = std::move(extension);
++}
++
++void recompui::renderer::refresh_user_config_extension() {
++    user_config_extension_changed = true;
++    ultramodern::trigger_config_action();
++}
++
+ void set_application_user_config(RT64::Application* application, const ultramodern::renderer::GraphicsConfig& config) {
+     switch (config.res_option) {
+         default:
+@@ -177,6 +190,9 @@ void set_application_user_config(RT64::Application* application, const ultramode
+     application->userConfig.refreshRateTarget = config.rr_manual_value;
+     application->userConfig.internalColorFormat = to_rt64(config.hpfb_option);
+     application->userConfig.displayBuffering = RT64::UserConfiguration::DisplayBuffering::Triple;
++    if (user_config_extension) {
++        user_config_extension(application->userConfig);
++    }
+ }
+ 
+ ultramodern::renderer::SetupResult map_setup_result(RT64::Application::SetupResult rt64_result) {
+@@ -367,7 +383,8 @@ void renderer::RT64Context::shutdown() {
+ }
+ 
+ bool renderer::RT64Context::update_config(const ultramodern::renderer::GraphicsConfig& old_config, const ultramodern::renderer::GraphicsConfig& new_config) {
+-    if (old_config == new_config) {
++    bool extension_changed = user_config_extension_changed.exchange(false);
++    if (old_config == new_config && !extension_changed) {
+         return false;
+     }
+ 
