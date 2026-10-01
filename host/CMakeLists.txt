@@ -18,7 +18,7 @@ endif()
 
 # The version: shown in the launcher and in the exe's Properties. A suffix (e.g. "-beta") marks test builds.
 set(CONKER_VERSION_MAJOR 1)
-set(CONKER_VERSION_MINOR 0)
+set(CONKER_VERSION_MINOR 1)
 set(CONKER_VERSION_PATCH 0)
 set(CONKER_VERSION_SUFFIX "")
 set(CONKER_VERSION_STRING "${CONKER_VERSION_MAJOR}.${CONKER_VERSION_MINOR}.${CONKER_VERSION_PATCH}${CONKER_VERSION_SUFFIX}")
@@ -63,6 +63,11 @@ add_executable(ConkerBFDReloaded
     src/render_fixes.cpp
     src/free_camera.cpp
     src/pause_background.cpp
+    src/fps_counter.cpp
+    src/pad_mappings.cpp
+    src/field_of_view.cpp
+    src/crosshair.cpp
+    src/qol.cpp
     src/look_aim.cpp
     src/rumble.cpp
     src/interpolation.cpp

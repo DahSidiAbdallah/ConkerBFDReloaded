@@ -54,7 +54,17 @@ namespace conker {
     // settings.cpp: the settings tabs.
     void init_settings();
     bool camera_inverted();
+    bool camera_tilt_inverted();
     float camera_turn_speed();
+    bool mouse_turns_camera();
+    float camera_field_of_view();
+    // free_camera.cpp: whether player 1's game camera was the normal follow camera last frame (not
+    // R-Look, aiming, cutscenes or another special camera).
+    bool normal_camera();
+    // field_of_view.cpp (CBFD-Recompiled V0.1.5): Camera: Field of View's part of the culls.
+    namespace field_of_view {
+        void adjust_cull_scales(uint8_t* rdram, uint64_t camera_address);
+    }
     bool skip_intro();
     bool free_camera_enabled();
     bool camera_auto_follow();
@@ -63,6 +73,63 @@ namespace conker {
     // scene_fixes.cpp: Skip Intro's steps.
     void skip_intro_on_vi(uint8_t* rdram);
     bool skip_intro_pressing_start();
+
+    // pad_mappings.cpp: N64 pads whose C-buttons SDL maps as face buttons get them as the right stick
+    // (from CBFD-Recompiled V0.1.5, their issue #28).
+    namespace pad_mappings {
+        // Rewrites the mapping of each such controller connected.
+        void fix_all();
+        // From SDL's event watch: a controller was connected (fixed at the next update).
+        void on_device_added();
+        // Every VI: fixes the controllers connected since the last one.
+        void update();
+    }
+
+    // crosshair.cpp: Aiming Crosshair (Conker tab).
+    namespace crosshair {
+        // settings.cpp: whether the setting is on.
+        bool enabled();
+        // look_aim.cpp, each frame of the second aiming mode (player 1): zoomed in (the sniper scope) or not.
+        void aiming(bool zoomed);
+        // look_aim.cpp, each frame of the look mode (player 1): shown unless the player holds R.
+        // vertical_fov: the camera's vertical field of view in use, in degrees.
+        void look_mode(float vertical_fov);
+        // frontend.cpp: player 1's buttons this frame (R held or not).
+        void set_buttons(uint16_t buttons);
+        // From the launcher's init (frontend.cpp): recompui's UI exists now.
+        void on_ui_ready();
+        // On the main thread (update_gfx): shows or hides it.
+        void update();
+    }
+
+    // qol.cpp: the Conker tab's quality-of-life options.
+    namespace qol {
+        void init();          // frontend.cpp, once SDL is up
+        void on_ui_ready();   // frontend.cpp, from the launcher's init
+        void update();        // main thread (update_gfx): the Saving Icon
+        void on_vi();         // every VI: Pause When Unfocused holds the game here
+        void set_player_buttons(uint16_t buttons); // player 1's own buttons (Skip Any Cutscene's hold)
+        uint16_t apply_toggles(uint16_t buttons); // player 1's buttons: Toggle R-Look / Crouch
+        // settings.cpp: the options.
+        bool saving_icon();
+        bool pause_unfocused();
+        bool skip_any_cutscene();
+        bool toggle_r_look();
+        bool toggle_crouch();
+        bool reduce_motion();
+    }
+
+    // fps_counter.cpp: Show FPS, the frame rate counter (from CBFD-Recompiled V0.1.5).
+    namespace fps_counter {
+        // settings.cpp: whether the setting is on.
+        bool enabled();
+        // From the launcher's init (frontend.cpp): recompui's UI exists now, so the counter can be made.
+        void on_ui_ready();
+        // On the main thread (update_gfx): shows or hides the counter, and updates it.
+        void update();
+        // From the game thread, as the game starts a frame's display list.
+        void game_frame();
+    }
 
     // testing.cpp: fast-forward, game-time screenshots (environment variables).
     namespace testing {

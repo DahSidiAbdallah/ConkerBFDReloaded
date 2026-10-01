@@ -27,6 +27,10 @@ namespace {
     std::atomic<bool> skip_intro_enabled{ false };
     std::atomic<bool> free_camera{ true };
     std::atomic<bool> auto_follow{ true };
+    std::atomic<bool> crosshair_on{ true };
+    // qol.cpp's options.
+    std::atomic<bool> saving_icon_on{ true }, pause_unfocused_on{ true }, skip_cutscene_on{ false };
+    std::atomic<bool> toggle_r_on{ false }, toggle_z_on{ false }, reduce_motion_on{ false };
 
     enum class Experience : uint32_t { Classic, Modern, Custom };
 
@@ -36,6 +40,7 @@ namespace {
         const std::string upscale_2d = "conker_upscale_2d";
         const std::string screen_filter = "conker_screen_filter";
         const std::string shading = "conker_shading";
+        const std::string show_fps = "show_fps"; // (fps_counter.cpp)
     }
     enum class TextureFilter : uint32_t { N64, Smooth };
     enum class Upscale2D : uint32_t { Original, ScaledOnly, All };
@@ -87,6 +92,13 @@ namespace {
             "look blotchy and angular. Smooth works it out for every pixel: soft, round pools of light.",
             { { Shading::Original, "Original", "Original" }, { Shading::Smooth, "Smooth", "Smooth" } },
             Shading::Original);
+        graphics.add_enum_option(extra::show_fps, "Show FPS",
+            "Shows the frame rate in the top-right corner while playing, to spot slowdowns. "
+            "<recomp-color primary>FPS</recomp-color> is the frames drawn to the screen each second (with the smooth frame rate, "
+            "more than the game makes): a drop there is the PC falling behind. "
+            "<recomp-color primary>Game</recomp-color> is the frames the game itself makes, up to 30: a drop there with FPS "
+            "steady is the game's own slowdown, as on the N64.",
+            { { 0u, "Off", "Off" }, { 1u, "On", "On" } }, 0u);
         graphics.add_option_change_callback(extra::shading,
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
                 rt64_conker_smooth_shading = (Shading)std::get<uint32_t>(cur) == Shading::Smooth ? 1 : 0;
@@ -135,6 +147,10 @@ namespace {
                 { Tab::Conker, "skip_intro", V{ false }, V{ true } },
                 { Tab::Conker, "free_camera", V{ false }, V{ true } },
                 { Tab::Conker, "camera_auto_follow", V{ true }, V{ true } },
+                { Tab::Conker, "aiming_crosshair", V{ false }, V{ true } },
+                { Tab::Conker, "saving_icon", V{ false }, V{ true } },
+                { Tab::Conker, "pause_unfocused", V{ false }, V{ true } },
+                { Tab::Conker, "skip_any_cutscene", V{ false }, V{ true } },
                 { Tab::General, recompui::config::general::options::mouse_sensitivity, V{ 0.0 }, V{ 50.0 } },
                 { Tab::General, "look_mouse_response", e(0u /* Smooth */), e(1u /* Direct */) },
             };
@@ -156,20 +172,25 @@ namespace {
         return experience == Experience::Modern ? setting.modern : setting.classic;
     }
 
-    bool same_value(const recomp::config::ConfigValueVariant& a, const recomp::config::ConfigValueVariant& b) {
-        const double* da = std::get_if<double>(&a);
-        const double* db = std::get_if<double>(&b);
-        if (da != nullptr && db != nullptr) {
-            return std::abs(*da - *db) < 0.5;
-        }
-        return a == b;
-    }
-
     // Set while the Conker tab's Experience is being changed by us, not the player, and while
     // Classic or Modern is being applied.
     bool syncing_experience = false;
 
+    // Classic and Modern decide their settings: those are greyed out (locked) while either is picked,
+    // and unlocked to choose freely with Custom. MSAA stays greyed out on graphics cards that can't
+    // do it (recompui greys it out itself then).
+    void lock_preset_settings(Experience experience) {
+        for (const PresetSetting& setting : preset_settings()) {
+            const bool locked = experience != Experience::Custom && preset_value(setting, experience).has_value();
+            if (!locked && setting.id == gfx::msaa_option && !recompui::renderer::RT64SamplePositionsSupported()) {
+                continue;
+            }
+            tab_config(setting.tab).update_option_disabled(setting.id, locked);
+        }
+    }
+
     void apply_experience(Experience experience) {
+        lock_preset_settings(experience);
         if (experience == Experience::Custom) {
             return;
         }
@@ -180,7 +201,9 @@ namespace {
             for (const PresetSetting& setting : preset_settings()) {
                 const auto& value = preset_value(setting, experience);
                 if (setting.tab == tab && value.has_value()) {
-                    config.set_option_value(setting.id, *value);
+                    // update_option_value also has the open settings page show the new value
+                    // (set_option_value alone changed it unseen: the switches stayed as they were).
+                    config.update_option_value(setting.id, *value);
                     changed = true;
                 }
             }
@@ -192,49 +215,14 @@ namespace {
         recompui::renderer::refresh_user_config_extension();
     }
 
-    // Which experience the settings match: Custom once the player has changed any of them from
-    // what Classic or Modern set.
-    Experience matching_experience() {
-        for (Experience experience : { Experience::Modern, Experience::Classic }) {
-            bool matches = true;
-            for (const PresetSetting& setting : preset_settings()) {
-                const auto& value = preset_value(setting, experience);
-                if (value.has_value()) {
-                    matches = matches && same_value(tab_config(setting.tab).get_option_value(setting.id), *value);
-                }
-            }
-            if (matches) {
-                return experience;
-            }
-        }
-        return Experience::Custom;
-    }
-
-    void sync_experience() {
-        if (syncing_experience) {
-            return;
-        }
-        recomp::config::Config& conker = recompui::config::get_config("conker");
-        Experience shown = (Experience)std::get<uint32_t>(conker.get_option_value("experience"));
-        Experience matching = matching_experience();
-        if (shown != matching) {
-            syncing_experience = true;
-            conker.update_option_value("experience", (uint32_t)matching);
-            syncing_experience = false;
-        }
-    }
-
-    // Keeps the Experience shown in step with the settings as they're applied or loaded (not
-    // while they're being tried out before Apply). The runtime runs these after an option's own
-    // callbacks (patches/n64modernruntime_conker.patch).
-    void watch_settings_for_experience() {
-        for (const PresetSetting& setting : preset_settings()) {
-            tab_config(setting.tab).add_option_change_callback(setting.id,
-                [](recomp::config::ConfigValueVariant, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
-                    if (context != recomp::config::OptionChangeContext::Temporary) {
-                        sync_experience();
-                    }
-                });
+    // After every tab has loaded: the saved Experience's settings are set (Classic and Modern decide
+    // theirs, including settings added since they were saved) and locked, or unlocked for Custom.
+    void enforce_experience() {
+        const Experience saved = (Experience)std::get<uint32_t>(recompui::config::get_config("conker").get_option_value("experience"));
+        apply_experience(saved);
+        if (saved != Experience::Custom) {
+            recompui::config::get_config("conker").save_config();
+            recompui::config::get_general_config().save_config();
         }
     }
 
@@ -245,18 +233,16 @@ namespace {
             "Classic plays the game as it was on the N64: 4:3, 30 frames per second, the original resolution, "
             "the full intro and the game's own camera. Modern picks the recommended settings: widescreen, your "
             "display's frame rate, full resolution, anti-aliasing, smooth textures and shading, straight to the save menu, "
-            "the free camera and mouse control. Custom is shown by itself once you change any of those; picking "
-            "Classic or Modern again sets them back. Invert, turning speed, rumble and gyro stay as you set them.",
+            "the free camera, the aiming crosshair and mouse control. While Classic or Modern is picked, the settings it "
+            "decides are greyed out; pick Custom to change them yourself. Invert, turning speed, rumble and gyro stay "
+            "as you set them.",
             { { Experience::Classic, "Classic", "Classic" }, { Experience::Modern, "Modern", "Modern" },
               { Experience::Custom, "Custom", "Custom" } },
             Experience::Modern);
-        // Custom can't be picked: it only shows that the Graphics settings are the player's own.
-        conker.update_enum_option_disabled("experience", (uint32_t)Experience::Custom, true);
         conker.add_option_change_callback("experience",
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
                 if (context == recomp::config::OptionChangeContext::Load) {
-                    // The saved choice is only a label: show what the Graphics settings match.
-                    sync_experience();
+                    // The other tabs load after this one: enforce_experience applies it once they have.
                 } else if (!syncing_experience) {
                     // The player picked one.
                     apply_experience((Experience)std::get<uint32_t>(cur));
@@ -293,6 +279,39 @@ namespace {
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
                 auto_follow = std::get<bool>(cur);
             });
+        conker.add_bool_option(
+            "aiming_crosshair", "Aiming Crosshair",
+            "Shows a small crosshair in the middle of the screen while Conker aims to throw something (or aims the "
+            "magnum), so you can see where it'll go. The original game has none there. The sniper scope keeps its own.",
+            true);
+        conker.add_option_change_callback("aiming_crosshair",
+            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                crosshair_on = std::get<bool>(cur);
+            });
+        auto add_bool = [&conker](const char* id, const char* name, const char* about, bool fallback, std::atomic<bool>* target) {
+            conker.add_bool_option(id, name, about, fallback);
+            conker.add_option_change_callback(id,
+                [target](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                    *target = std::get<bool>(cur);
+                });
+        };
+        add_bool("saving_icon", "Saving Icon",
+            "Shows Conker's head in the bottom-right corner while the game saves (at checkpoints and on the save "
+            "menu), as modern games do. The original game shows none.", true, &saving_icon_on);
+        add_bool("pause_unfocused", "Pause When Unfocused",
+            "Pauses the game while its window isn't the one you're using (after alt-tab, or clicking another window), "
+            "and carries on when you come back.", true, &pause_unfocused_on);
+        add_bool("skip_any_cutscene", "Skip Any Cutscene",
+            "Hold L to skip any cutscene, even the first time you see it (the original only lets you skip ones you've "
+            "watched before), including the ones it never lets you skip, like the opening. \"Hold to Skip\" shows in "
+            "the corner with a ring that fills while you hold; a quick press doesn't skip.", false, &skip_cutscene_on);
+        add_bool("reduce_motion", "Reduce Motion Effects",
+            "Accessibility: turns off the motion blur (the ghostly trails while Conker is drunk at the start of the "
+            "game), which can cause motion sickness.", false, &reduce_motion_on);
+        add_bool("toggle_r_look", "Toggle R-Look",
+            "Accessibility: press R once to look around and again to stop, instead of holding it.", false, &toggle_r_on);
+        add_bool("toggle_crouch", "Toggle Crouch",
+            "Accessibility: press Z once to crouch and again to stand, instead of holding it.", false, &toggle_z_on);
     }
 
     void describe_controls() {
@@ -336,13 +355,13 @@ void conker::init_settings() {
     conker::look_aim::add_options(general_config);
     recompui::config::create_graphics_tab();
     add_extra_graphics_options();
-    watch_settings_for_experience();
     describe_controls();
     recompui::config::create_controls_tab();
     recompui::config::create_sound_tab();
     conker::sound::add_volume_options();
     recompui::config::create_mods_tab();
     recompui::config::finalize();
+    enforce_experience();
 }
 
 // The General tab's Camera: Invert Turning and Camera: Turning Speed (look_aim.cpp, from
@@ -350,7 +369,27 @@ void conker::init_settings() {
 bool conker::camera_inverted() {
     auto value = recompui::config::get_general_config().get_option_value("camera_invert_turning");
     const uint32_t* v = std::get_if<uint32_t>(&value);
-    return v != nullptr && *v == 1; // Invert X
+    return v != nullptr && (*v == 1 || *v == 3); // Invert X, Invert Both
+}
+
+bool conker::camera_tilt_inverted() {
+    auto value = recompui::config::get_general_config().get_option_value("camera_invert_turning");
+    const uint32_t* v = std::get_if<uint32_t>(&value);
+    return v != nullptr && (*v == 2 || *v == 3); // Invert Y, Invert Both
+}
+
+// The General tab's Mouse: Turn the Camera and Camera: Field of View (look_aim.cpp, from
+// CBFD-Recompiled V0.1.5).
+bool conker::mouse_turns_camera() {
+    auto value = recompui::config::get_general_config().get_option_value("mouse_turns_camera");
+    const uint32_t* v = std::get_if<uint32_t>(&value);
+    return v == nullptr || *v == 0; // On
+}
+
+float conker::camera_field_of_view() {
+    auto value = recompui::config::get_general_config().get_option_value("camera_field_of_view_degrees");
+    const double* v = std::get_if<double>(&value);
+    return v != nullptr ? (float)*v : 50.0f;
 }
 
 float conker::camera_turn_speed() {
@@ -368,7 +407,22 @@ bool conker::free_camera_enabled() {
     return free_camera;
 }
 
+bool conker::crosshair::enabled() {
+    return crosshair_on;
+}
+
 bool conker::skip_intro() {
     static const bool forced = std::getenv("CONKER_SKIP_INTRO") != nullptr;
     return skip_intro_enabled || forced;
 }
+
+bool conker::fps_counter::enabled() {
+    return graphics_value(extra::show_fps) == 1;
+}
+
+bool conker::qol::saving_icon() { return saving_icon_on; }
+bool conker::qol::pause_unfocused() { return pause_unfocused_on; }
+bool conker::qol::skip_any_cutscene() { return skip_cutscene_on; }
+bool conker::qol::toggle_r_look() { return toggle_r_on; }
+bool conker::qol::toggle_crouch() { return toggle_z_on; }
+bool conker::qol::reduce_motion() { return reduce_motion_on; }

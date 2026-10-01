@@ -121,6 +121,7 @@ namespace {
         bool placed_directly = false;   // this frame's eye was placed at the orbit's target
         float placed[3] = {};           // the eye placed for the collision this frame
     } orbit;
+    bool was_normal_camera = false; // conker::normal_camera (Camera: Field of View)
 
     float read_float(uint8_t* rdram, gpr base, int32_t offset) {
         uint32_t word = (uint32_t)MEM_W(offset, base);
@@ -191,6 +192,10 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     if (!orbit.turned) {
         recompinput::get_mouse_deltas(&mouse_x, &mouse_y);
         notches = wheel_notches.exchange(0);
+        if (!conker::mouse_turns_camera()) { // Mouse: Turn the Camera off: the mouse only aims
+            mouse_x = mouse_y = 0.0f;
+            notches = 0;
+        }
         orbit.turned = true;
         // The right stick, turned into mouse-like pixels for this frame (game time, so
         // it turns as fast at any frame rate or test speed).
@@ -327,6 +332,7 @@ extern "C" void conker_mouse_camera(uint8_t* rdram, recomp_context* ctx) {
     if ((uint32_t)camera != (uint32_t)MEM_W(0, (gpr)(int32_t)current_camera)) {
         return;
     }
+    was_normal_camera = orbit.follow_camera_ran && !orbit.look_mode_ran;
     if (!orbit.follow_camera_ran || orbit.look_mode_ran) {
         orbit.engaged = false;
     }
@@ -348,6 +354,10 @@ extern "C" void conker_mouse_camera(uint8_t* rdram, recomp_context* ctx) {
     if (!orbit.engaged) {
         orbit.has_pivot = false;
     }
+}
+
+bool conker::normal_camera() {
+    return was_normal_camera;
 }
 
 // frontend.cpp, once SDL is up: listen for the scroll wheel.
@@ -382,5 +392,8 @@ void conker::free_camera_stick(float* x, float* y) {
     *y = shape(sy);
     if (conker::camera_inverted()) {
         *x = -*x;
+    }
+    if (conker::camera_tilt_inverted()) {
+        *y = -*y;
     }
 }

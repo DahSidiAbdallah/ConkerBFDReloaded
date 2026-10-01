@@ -46,10 +46,10 @@ index dccaa87..0ea98c1 100644
          }
  
 diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
-index 7de5b69..6e46ec9 100644
+index 7de5b69..62ac019 100644
 --- a/src/hle/rt64_present_queue.cpp
 +++ b/src/hle/rt64_present_queue.cpp
-@@ -4,6 +4,10 @@
+@@ -4,12 +4,26 @@
  
  #include "rt64_present_queue.h"
  
@@ -60,9 +60,27 @@ index 7de5b69..6e46ec9 100644
  #include "common/rt64_thread.h"
  #include "rhi/rt64_render_hooks.h"
  
-@@ -403,6 +407,17 @@ namespace RT64 {
+ #include "rt64_workload_queue.h"
+ 
++#include <atomic>
++
+ namespace RT64 {
++    // Conker (from CBFD-Recompiled V0.1.5): frames presented to the screen so far, for the Show FPS
++    // counter (host/src/fps_counter.cpp).
++    static std::atomic<uint64_t> presentedFrames = 0;
++
++    uint64_t presentedFrameCount() {
++        return presentedFrames.load(std::memory_order_relaxed);
++    }
++
+     // PresentQueue
+ 
+     PresentQueue::PresentQueue() {
+@@ -402,7 +416,19 @@ namespace RT64 {
+                 RenderCommandSemaphore *waitSemaphore = drawSemaphores[swapChainIndex].get();
                  presentTimestamp = Timer::current();
                  swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
++                presentedFrames.fetch_add(1, std::memory_order_relaxed);
                  presentProfiler.logAndRestart();
 +                // Testing (Conker BFD: Reloaded): RT64_PRESENT_LOG=path logs each frame shown:
 +                // microseconds, the frame's place among this game frame's frames, and their count.
@@ -78,6 +96,20 @@ index 7de5b69..6e46ec9 100644
              }
          }
      }
+diff --git a/src/hle/rt64_present_queue.h b/src/hle/rt64_present_queue.h
+index e08b02c..e5f5131 100644
+--- a/src/hle/rt64_present_queue.h
++++ b/src/hle/rt64_present_queue.h
+@@ -17,6 +17,9 @@
+ namespace RT64 {
+     struct WorkloadQueue;
+ 
++    // Conker: the number of frames presented to the screen so far, from any thread (Show FPS).
++    uint64_t presentedFrameCount();
++
+     struct PresentQueue {
+         struct External {
+             ApplicationWindow *appWindow = nullptr;
 diff --git a/src/hle/rt64_rdp.cpp b/src/hle/rt64_rdp.cpp
 index a10c11a..7e0db9b 100644
 --- a/src/hle/rt64_rdp.cpp

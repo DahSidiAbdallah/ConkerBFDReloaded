@@ -127,6 +127,39 @@ func = "func_100095A0"
 before_vram = 0x100095D0
 text = "{ extern void osAiGetLength_recomp(uint8_t*, recomp_context*); osAiGetLength_recomp(rdram, ctx); ctx->r3 = ctx->r2; }"
 
+# Music (CBFD-Recompiled V0.1.5, issue #66; host/src/libultra_extras.cpp). func_10008CE8 (start a
+# song on a sequence player) busy-waits for the audio thread to stop the player, which on the N64
+# preempts it; here the loop has to yield for the audio thread to run. A hook at the head of each of
+# its two wait loops, before the n_alCSPGetState call.
+[[patches.hook]]
+func = "func_10008CE8"
+before_vram = 0x10008D44
+text = "{ extern void conker_spin_wait_pass(uint8_t*, recomp_context*); conker_spin_wait_pass(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_10008CE8"
+before_vram = 0x10008D98
+text = "{ extern void conker_spin_wait_pass(uint8_t*, recomp_context*); conker_spin_wait_pass(rdram, ctx); }"
+
+# A song just started reads as stopped until the audio thread takes it up, and the music manager
+# took such a player for free while it played on. So it reads as playing until then: marked when
+# func_10008CE8 starts the song, the mark cleared when func_10008F24 stops the player, and
+# func_1000853C (a player's state) answers "playing" meanwhile.
+[[patches.hook]]
+func = "func_10008CE8"
+before_vram = 0x10008EC4
+text = "{ extern void conker_song_started(uint8_t*, recomp_context*); conker_song_started(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_1000853C"
+before_vram = 0x10008560
+text = "{ extern void conker_song_state(uint8_t*, recomp_context*); conker_song_state(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_10008F24"
+before_vram = 0x10008F24
+text = "{ extern void conker_song_stopped(uint8_t*, recomp_context*); conker_song_stopped(rdram, ctx); }"
+
 # func_1000480C: Rare's PIO copy from cartridge ROM (used by the ROM loader
 # func_10004514). It polls PI_STATUS, then reads the cartridge word by word
 # through (osRomBase | addr | 0xA0000000).
@@ -674,3 +707,27 @@ text = "{ extern void conker_pause_background(uint8_t*, recomp_context*); conker
 func = "func_151D61B0"
 before_vram = 0x151D61B0
 text = "{ extern void conker_pause_background_blur(uint8_t*, recomp_context*); conker_pause_background_blur(rdram, ctx); }"
+
+# Camera: Field of View (host/src/field_of_view.cpp, from CBFD-Recompiled V0.1.5): func_1510B128
+# has just stored the camera's horizontal and vertical fields of view ($v0 the camera, $s0 its
+# offset); the projection, frustum and culls are worked out from them after this.
+[[patches.hook]]
+func = "func_1510B128"
+before_vram = 0x1510B1A8
+text = "{ extern void conker_field_of_view(uint8_t*, recomp_context*); conker_field_of_view(rdram, ctx); }"
+
+# Skip Any Cutscene (host/src/qol.cpp): func_1501E05C is the game's "skip the playing cutscene?"
+# check; at 0x1501E1A4, where all its paths meet before returning ($v0 the answer), holding L long
+# enough decides instead (any cutscene, even unwatched or marked never skippable, as CBFD-Recompiled's
+# Skip Any Cutscene mod allows; a press alone no longer skips).
+[[patches.hook]]
+func = "func_1501E05C"
+before_vram = 0x1501E1A4
+text = "{ extern void conker_skip_cutscene_result(uint8_t*, recomp_context*); conker_skip_cutscene_result(rdram, ctx); }"
+
+# Reduce Motion Effects (host/src/qol.cpp): func_151D6778's motion blur strength (D_800BE574, $v1),
+# just before it's tested.
+[[patches.hook]]
+func = "func_151D6778"
+before_vram = 0x151D6798
+text = "{ extern void conker_motion_blur(uint8_t*, recomp_context*); conker_motion_blur(rdram, ctx); }"

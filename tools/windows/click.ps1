@@ -1,4 +1,5 @@
-# Click at window-relative positions: -Points "x,y;x,y" with -Delays "sec;sec" (seconds since start)
+# Click at window-relative positions: -Points "x,y;x,y" with -Delays "sec;sec" (seconds since start).
+# A point "ESC" presses Escape instead (the in-game settings menu).
 param([string]$Proc = "ConkerBFDReloaded", [string]$Points, [string]$Delays)
 Add-Type @"
 using System; using System.Runtime.InteropServices;
@@ -17,6 +18,12 @@ for ($i = 0; $i -lt $pts.Length; $i++) {
   if (-not $p) { "no window"; continue }
   $h = $p.MainWindowHandle; $r = New-Object M+RECT; [M]::GetWindowRect($h, [ref]$r) | Out-Null
   [M]::SetForegroundWindow($h) | Out-Null
+  if ($pts[$i] -eq "ESC") {
+    # Click the window's middle first so it has the keyboard, then press Escape.
+    [M]::SetCursorPos(($r.L + $r.R) / 2, ($r.T + $r.B) / 2) | Out-Null; Start-Sleep -Milliseconds 100
+    [M]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 60; [M]::mouse_event(4,0,0,0,0); Start-Sleep -Milliseconds 300
+    Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); "pressed ESC"; continue
+  }
   $xy = $pts[$i].Split(","); [M]::SetCursorPos($r.L + [int]$xy[0], $r.T + [int]$xy[1]) | Out-Null
   Start-Sleep -Milliseconds 150; [M]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 60; [M]::mouse_event(4,0,0,0,0)
   "clicked $($pts[$i])"

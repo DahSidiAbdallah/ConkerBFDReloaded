@@ -104,6 +104,34 @@ namespace {
         poster_shown = std::chrono::steady_clock::now();
     }
 
+    // Prints what SDL says about a controller (name, GUID, mapping, device), for controller reports.
+    // (From CBFD-Recompiled V0.1.5, as the two below.)
+    void print_controller(int index) {
+        char guid[64];
+        SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(index), guid, sizeof(guid));
+        const char* name = SDL_GameControllerNameForIndex(index);
+        const char* path = SDL_GameControllerPathForIndex(index);
+        char* mapping = SDL_GameControllerMappingForDeviceIndex(index);
+        std::printf("[controller] connected: %s (GUID %s, device %s)\n  mapping: %s\n", name ? name : "?", guid,
+            path ? path : "?", mapping ? mapping : "none");
+        SDL_free(mapping);
+    }
+
+    // Watches controllers connecting: each is printed, and its C-buttons remapped if they need it
+    // (pad_mappings.cpp).
+    int SDLCALL watch_controllers(void*, SDL_Event* event) {
+        switch (event->type) {
+        case SDL_JOYDEVICEADDED:
+            conker::pad_mappings::on_device_added();
+            break;
+        case SDL_CONTROLLERDEVICEADDED:
+            print_controller(event->cdevice.which);
+            break;
+        }
+        std::fflush(stdout);
+        return 1;
+    }
+
     void* create_gfx() {
         SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
         SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
@@ -111,6 +139,15 @@ namespace {
         SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+#if defined(__linux__)
+        // Nintendo's online classic controllers (the N64 one, and pads like the 8BitDo 64 in its
+        // Switch mode) through the kernel's driver, not SDL's HIDAPI one, so there's one layout for
+        // pad_mappings.cpp to make the C-buttons the right stick of: SDL3, under Linux distributions'
+        // sdl2-compat, maps both as a Switch pad, and HIDAPI's puts one C-button on an axis. Windows
+        // keeps SDL's default. The SDL_JOYSTICK_HIDAPI_NINTENDO_CLASSIC environment variable still
+        // overrides this.
+        SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_NINTENDO_CLASSIC, "0");
+#endif
         Uint32 subsystems = SDL_INIT_VIDEO;
         // CONKER_NO_CONTROLLER=1 ignores controllers (test runs while someone plays).
         if (SDL_getenv("CONKER_NO_CONTROLLER") == nullptr) {
@@ -119,8 +156,28 @@ namespace {
         if (SDL_Init(subsystems) != 0) {
             std::fprintf(stderr, "[frontend] SDL_Init failed: %s\n", SDL_GetError());
         }
+        SDL_version sdl_version;
+        SDL_GetVersion(&sdl_version);
+        std::printf("[frontend] SDL %d.%d.%d\n", sdl_version.major, sdl_version.minor, sdl_version.patch);
+        // N64 pads and adapters SDL has no mapping for, or maps as other pads (assets/controllerdb.txt,
+        // from CBFD-Recompiled V0.1.5). Only mappings, so the controllers connected at start are
+        // picked up when they're opened.
+        const std::u8string controller_db = recompui::file::get_asset_path("controllerdb.txt").u8string();
+        const int controller_mappings = SDL_GameControllerAddMappingsFromFile(reinterpret_cast<const char*>(controller_db.c_str()));
+        if (controller_mappings < 0) {
+            std::fprintf(stderr, "[frontend] couldn't load the controller mappings: %s\n", SDL_GetError());
+        } else {
+            std::printf("[frontend] controller mappings: %d added\n", controller_mappings);
+        }
+        SDL_AddEventWatch(watch_controllers, nullptr);
+        // The controllers connected at start were announced before the watch.
+        for (int index = 0; index < SDL_NumJoysticks(); index++) {
+            print_controller(index);
+        }
+        conker::pad_mappings::fix_all();
         NFD_Init(); // file dialogs (Load ROM, mods)
         conker_mouse_camera_init(); // the Free Camera's scroll wheel zoom (free_camera.cpp)
+        conker::qol::init(); // Pause When Unfocused watches the window's focus
         return nullptr;
     }
 
@@ -147,6 +204,9 @@ namespace {
 
     void update_gfx(void*) {
         recompinput::handle_events();
+        conker::fps_counter::update();
+        conker::crosshair::update();
+        conker::qol::update();
     }
 
     // The logo, in the dark left part of the poster.
@@ -191,6 +251,10 @@ namespace {
         menu->remove_default_title();
         add_posters(menu);
         add_logo(menu);
+        // recompui's UI exists now: the FPS counter can make its own.
+        conker::fps_counter::on_ui_ready();
+        conker::crosshair::on_ui_ready();
+        conker::qol::on_ui_ready();
 
         recompui::GameOptionsMenu* options = menu->init_game_options_menu(
             game.game_id, game.mod_game_id, game.display_name, game.thumbnail_bytes,
@@ -298,6 +362,11 @@ namespace {
         }
         if (controller == 0 && conker::skip_intro_pressing_start()) {
             *buttons |= 0x1000; // Start
+        }
+        if (controller == 0) {
+            conker::qol::set_player_buttons(*buttons);
+            *buttons = conker::qol::apply_toggles(*buttons);
+            conker::crosshair::set_buttons(*buttons);
         }
         if (controller == 0) {
             static bool start_was_down = false;
@@ -536,6 +605,7 @@ int conker::frontend::port_controllers(std::array<SDL_GameController*, max_ports
 
 void conker::frontend::on_vi() {
     conker::rumble::update();
+    conker::pad_mappings::update();
 }
 
 ultramodern::input::connected_device_info_t conker::frontend::device_info(int controller_num) {

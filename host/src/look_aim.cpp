@@ -107,7 +107,11 @@ namespace {
         const std::string gyro_invert = "look_gyro_invert";
         const std::string camera_turn_invert = "camera_invert_turning";
         const std::string camera_turn_speed = "camera_turn_speed";
+        // From CBFD-Recompiled V0.1.5 (same ids, so their settings carry over):
+        const std::string mouse_camera = "mouse_turns_camera";
+        const std::string camera_fov = "camera_field_of_view_degrees";
     }
+    enum class Toggle : uint32_t { On, Off };
 
     enum class Response : uint32_t { Smooth, Direct };
     enum class Invert : uint32_t { None, X, Y, Both };
@@ -147,6 +151,12 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
     static EnumOptions turn_invert = {
         {Invert::None, "None", "None"},
         {Invert::X, "InvertX", "Invert X"},
+        {Invert::Y, "InvertY", "Invert Y"},
+        {Invert::Both, "InvertBoth", "Invert Both"},
+    };
+    static EnumOptions toggle = {
+        {Toggle::On, "On", "On"},
+        {Toggle::Off, "Off", "Off"},
     };
 
     // Grouped by what they're about, each group's names starting alike: the camera, then aiming with
@@ -154,12 +164,24 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
     // saved values carry over), added here instead of by its General tab to sit with their group.
     config.add_enum_option(options::camera_turn_invert, "Camera: Invert Turning",
         "Inverts the camera's left and right turning in single player, with the right stick or C-Left and C-Right. "
-        "<recomp-color primary>None</recomp-color> matches the original game. Strafing in multiplayer isn't affected.",
+        "<recomp-color primary>None</recomp-color> matches the original game. Strafing in multiplayer isn't affected. "
+        "Y inverts the Free Camera's tilting up and down with the right stick.",
         turn_invert, Invert::None);
     config.add_number_option(options::camera_turn_speed, "Camera: Turning Speed",
         "Sets how fast the camera turns left and right in single player, with the right stick or C-Left and C-Right. "
         "Strafing in multiplayer isn't affected.",
         50.0, 300.0, 5.0, 0, true, 100.0);
+    config.add_number_option(options::camera_fov, "Camera: Field of View",
+        "How wide the normal camera sees, in degrees, as its vertical field of view (the same whatever the aspect ratio). "
+        "<recomp-color primary>50</recomp-color> matches the original game (60.6 degrees across at 4:3). More shows more "
+        "around Conker, less brings the view in closer; the camera stays as far away. Only the normal camera: R-Look, "
+        "aiming (so the scope's zoom), cutscenes and other special cameras stay as the game has them.",
+        35.0, 80.0, 1.0, 0, false, 50.0);
+    config.add_enum_option(options::mouse_camera, "Mouse: Turn the Camera",
+        "Whether the mouse turns the Free Camera around Conker, outside R-Look and aiming. Needs Mouse: Sensitivity above zero. "
+        "<recomp-color primary>Off</recomp-color> leaves that camera to the stick and C-buttons; the mouse still aims in "
+        "R-Look and the second aiming mode (e.g. the sniper scope).",
+        toggle, Toggle::On);
 
     config.add_enum_option(options::stick_response, "Stick: Aiming Response",
         "How the view follows the stick in R-Look (hold R and look around)." + about +
@@ -254,7 +276,8 @@ extern "C" void conker_look_stick_pitch(uint8_t* rdram, recomp_context* ctx) {
 // C-buttons' turn direction, 1 (C-Right) or -1 (C-Left), at + 0x6B0.
 extern "C" void conker_camera_turn_invert(uint8_t* rdram, recomp_context* ctx) {
 #if defined(CONKER_RT64)
-    if (option<Invert>(options::camera_turn_invert) == Invert::X) {
+    const Invert invert = option<Invert>(options::camera_turn_invert);
+    if (invert == Invert::X || invert == Invert::Both) {
         MEM_W(0x6B0, ctx->r16) = -MEM_W(0x6B0, ctx->r16);
     }
 #endif
@@ -338,16 +361,18 @@ extern "C" void conker_aim_stick(uint8_t* rdram, recomp_context* ctx) {
     if (!is_player_one(rdram, camera)) {
         return;
     }
-    float mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch;
-    if (!take_movement(mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch)) {
-        return;
-    }
     const gpr view = (gpr)(int32_t)((uint32_t)MEM_W(0, (gpr)(int32_t)0x800BE628) + MEM_BU(0x23D, camera) * 0x180);
     constexpr float half_degrees_to_radians = 3.14159265358979f / 360.0f;
     const float fov = read_float(rdram, view, 0x74), unzoomed = read_float(rdram, view, 0x6C);
     float zoom = 1.0f;
     if (fov > 0.0f && unzoomed > 0.0f && fov < 180.0f && unzoomed < 180.0f) {
         zoom = std::clamp(std::tan(fov * half_degrees_to_radians) / std::tan(unzoomed * half_degrees_to_radians), 0.02f, 2.0f);
+    }
+    // Aiming Crosshair (crosshair.cpp): aiming, and zoomed in (the scope) or not.
+    conker::crosshair::aiming(zoom < 0.9f);
+    float mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch;
+    if (!take_movement(mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch)) {
+        return;
     }
     // The yaw's turn is subtracted, the pitch's added.
     ctx->f14.fl -= (mouse_yaw + gyro_yaw) * zoom;
@@ -380,6 +405,12 @@ extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
     // look the way they move: mouse or controller up looks up (take_movement).
     if (!is_player_one(rdram, ctx->r16)) {
         return;
+    }
+    // Aiming Crosshair (crosshair.cpp): the look mode, which the game also puts Conker in to throw
+    // (the knives in the barn); only then, not while the player holds R to look around.
+    {
+        const gpr view = (gpr)(int32_t)((uint32_t)MEM_W(0, (gpr)(int32_t)0x800BE628) + MEM_BU(0x23D, ctx->r16) * 0x180);
+        conker::crosshair::look_mode(read_float(rdram, view, 0x78)); // the vertical field of view in use
     }
     float mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch;
     if (!take_movement(mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch)) {

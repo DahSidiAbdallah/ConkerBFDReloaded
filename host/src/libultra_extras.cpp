@@ -2,6 +2,7 @@
 // runtime provides, and the helpers recomp/conker.toml's hooks call. The hook list
 // comes from CBFD-Recompiled (MIT, Sean Ciaschi).
 
+#include <chrono>
 #include <csetjmp>
 #include <cstdio>
 
@@ -40,6 +41,73 @@ extern "C" int32_t conker_kseg1_read32(uint8_t* rdram, uint32_t vaddr) {
     }
     std::fprintf(stderr, "[extras] unhandled KSEG1 read: %08X\n", vaddr);
     return 0;
+}
+
+// Music (CBFD-Recompiled V0.1.5, issue #66; hooks in recomp/conker.toml).
+// A pass of a busy-wait loop: func_10008CE8, which starts a song on a sequence player, stops the
+// player and then counts up to 2,000,000 (then 4,000,000) while it waits for the audio thread to
+// report it stopped. On the N64 the audio thread preempts the loop; here game threads switch only
+// when one waits or yields, so the loop ran out without the audio thread running, and the new song
+// went to a player still playing the old one (the bar's music played on after loading a save from
+// the menu the game over leads to). This yields for up to 1 ms, letting the audio thread run, and
+// counts that as the passes the N64 would have made in the time (about 3,000), so the loop still
+// gives up after about as long as it would there. The count ($s0) stays at or under the loop's
+// bound ($s1), which both loops end on.
+extern "C" void yield_self_1ms(uint8_t* rdram);
+extern "C" void conker_spin_wait_pass(uint8_t* rdram, recomp_context* ctx) {
+    constexpr uint32_t passes_per_ms = 3000;
+    yield_self_1ms(rdram);
+    const uint32_t count = (uint32_t)ctx->r16;
+    const uint32_t bound = (uint32_t)ctx->r17;
+    ctx->r16 = (count < bound && bound - count > passes_per_ms) ? count + passes_per_ms : bound;
+}
+
+// A song just started still reads as stopped. Starting a song (func_10008CE8) only queues an event
+// for the audio thread, and the player says it's stopped (its state, +0x2C, AL_STOPPED) until the
+// audio thread has handled it, which here can be a frame or more later. The music manager
+// (func_1000D2F8) asked the player then (func_1000853C), took the song for finished and freed its
+// player while it played on: the outside ambience went on inside the bar, later songs landed on the
+// wrong players, and in the stone dragon's mouth the wrong one faded while the level's music played
+// on very loud. So until the audio thread has it, the player reads as playing: marked when
+// func_10008CE8 starts its song, the mark cleared once it plays, when the game stops it, or after
+// 500 ms (should the song never start).
+namespace {
+    constexpr int sequence_players = 3; // D_8003C900
+    std::chrono::steady_clock::time_point song_started_at[sequence_players];
+    bool song_just_started[sequence_players] = {};
+}
+
+// func_10008CE8 at 0x10008EC4, just after it starts the song: its player number is its first
+// argument, the byte at $sp + 0x43.
+extern "C" void conker_song_started(uint8_t* rdram, recomp_context* ctx) {
+    const uint32_t player = MEM_BU(0x43, ctx->r29);
+    if (player >= sequence_players) {
+        return;
+    }
+    song_just_started[player] = true;
+    song_started_at[player] = std::chrono::steady_clock::now();
+}
+
+// func_10008F24 (stop a player) at its start: $a0 the player number.
+extern "C" void conker_song_stopped(uint8_t* rdram, recomp_context* ctx) {
+    const uint32_t player = (uint32_t)ctx->r4 & 0xFF;
+    if (player < sequence_players) {
+        song_just_started[player] = false;
+    }
+}
+
+// func_1000853C (a player's state) at 0x10008560, after reading it: $v0 the state, $a1 the player.
+extern "C" void conker_song_state(uint8_t* rdram, recomp_context* ctx) {
+    constexpr auto start_limit = std::chrono::milliseconds(500);
+    const uint32_t player = (uint32_t)ctx->r5 & 0xFF;
+    if (player >= sequence_players || !song_just_started[player]) {
+        return;
+    }
+    if ((int32_t)ctx->r2 != 0 || std::chrono::steady_clock::now() - song_started_at[player] > start_limit) {
+        song_just_started[player] = false;
+        return;
+    }
+    ctx->r2 = 1; // AL_PLAYING
 }
 
 // Rare's script interpreter (func_150ADAF0) leaves nested calls with a longjmp-like

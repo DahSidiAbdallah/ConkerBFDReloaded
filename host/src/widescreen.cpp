@@ -23,6 +23,7 @@
 
 #include "recomp.h"
 #include "ultramodern/config.hpp"
+#include "conker.hpp"
 
 // The game window (frontend.cpp).
 extern SDL_Window* window;
@@ -181,6 +182,7 @@ namespace {
 // func_1501878C, as it starts the frame's display list.
 extern "C" void conker_frame_dl_begin(uint8_t* rdram, recomp_context* ctx) {
     extended_enabled = false;
+    conker::fps_counter::game_frame();
 }
 
 // func_15019464, just after func_1501A490 wrote a pipe sync and the camera's scissor ($v0 after them).

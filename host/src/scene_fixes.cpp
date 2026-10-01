@@ -131,6 +131,8 @@ extern "C" void conker_scene_widen_frustum(uint8_t* rdram, recomp_context* ctx) 
 }
 
 extern "C" void conker_scene_widen_cull_scale(uint8_t* rdram, recomp_context* ctx) {
+    // Camera: Field of View first ($v0 is the camera), in 4:3 too (field_of_view.cpp).
+    conker::field_of_view::adjust_cull_scales(rdram, ctx->r2);
     static const bool test_original_culling = std::getenv("CONKER_TEST_43_CULLING") != nullptr; // testing
     if (!room_staged_for_4_3(rdram) && !test_original_culling) {
         conker_widen_cull_scale(rdram, ctx);

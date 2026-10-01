@@ -51,9 +51,11 @@ with `./ConkerBFDReloaded --rom /path/to/conker.z64`. It's remembered after that
 camera, the original lighting and shading. You get the higher resolution and nothing else changes.
 
 **Modern** turns on widescreen, the smooth frame rate, sharper 2D graphics, smooth shading, the
-free camera with auto-follow, Skip Intro and direct mouse aiming.
+free camera with auto-follow, the aiming crosshair, the saving icon, hold-to-skip cutscenes,
+pausing when you alt-tab, Skip Intro and direct mouse aiming.
 
-Change anything yourself and it shows **Custom**, so you always know where you stand.
+While Classic or Modern is picked, the settings it decides are greyed out. Pick **Custom** to
+change any of them yourself.
 
 ## What's in it
 
@@ -74,6 +76,15 @@ Change anything yourself and it shows **Custom**, so you always know where you s
   Now you can.
 - **Skip Intro.** Straight to the bar menu in a couple of seconds.
 - **Classic / Modern / Custom presets**, as described above.
+- **Aiming crosshair.** A red dot shows where a throw will land when Conker aims (the knives in
+  the barn, throwables, the magnum). It's lined up with where the game actually throws, and it
+  stays out of the way when you just hold R to look around. The original has none.
+- **Saving icon.** A little Conker head in the corner while the game saves, like modern games.
+- **Hold to skip cutscenes.** Hold L to skip any cutscene, even the first time you see it and the
+  ones the original never lets you skip. A ring fills while you hold, so you can't skip by accident.
+- **Pause when you alt-tab.** The game waits for you while its window isn't the one you're using.
+- **Accessibility options:** press R or Z once to look around or crouch instead of holding them,
+  and Reduce Motion Effects turns off the motion blur.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
   resolutions you could see thin lines where they met (PLAY, PAUSED and so on). They're joined
   smoothly now.
@@ -91,6 +102,8 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Smooth shading.** Lighting worked out per pixel instead of per corner, so torch light looks
   round and soft. I checked that it matches the original's brightness in the areas I tested,
   but not across the whole game.
+- **The crosshair with other weapons.** It's lined up and tested with the knives in the barn. With
+  other throwables and the magnum it sits in the middle of the screen, which I haven't checked yet.
 - **Frame rates above 60.** Smooth 60 fps is tested. I couldn't test 120 Hz and up because I don't
   have a screen that goes that high.
 - **Linux build.** It builds and runs the game at full speed, and draws correctly, but I've only
@@ -106,10 +119,12 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 
 A lot of great work came from [CBFD-Recompiled](https://github.com/sciaschi/CBFD-Recompiled) by
 Sean Ciaschi, and it's included here with credit. That covers mouse and gyro aiming, rumble
-options, camera turning speed and invert, multiple controllers for multiplayer, binding mouse
-buttons, and a long list of fixes (the sky crash on wide screens, doors clipping in widescreen,
-the drunk-effect smear, cutscene camera cuts, speech bubbles, light glows, and more). Files taken
-from their project say so at the top.
+options, camera turning speed and invert, a Field of View setting, a frame rate counter, built-in
+support for N64 controllers and adapters (raphnet, Mayflash, Hyperkin, the Switch Online N64
+controller, the 8BitDo 64), multiple controllers for multiplayer, binding mouse buttons, and a long
+list of fixes (the sky crash on wide screens, doors clipping in widescreen, the drunk-effect smear,
+cutscene camera cuts, speech bubbles, light glows, the wrong music playing after a game over or in
+the stone dragon's mouth, and more). Files taken from their project say so at the top.
 
 ## HD Icons texture pack
 
@@ -139,13 +154,12 @@ shared under the same license, and the `LICENSE.txt` inside it lists what was ch
 - **Controls feel like the original.** The game still runs its logic at 30 fps like on the N64. The
   smooth frame rate makes it look smoother, but Conker handles exactly the way he always did.
 - **Light glows at the screen edges** can fade out toward the left and right sides in widescreen.
-- **Rumble in multiplayer** is shared: player 1's rumble shakes every controller.
 - **Mods made for CBFD-Recompiled** load, but I haven't checked that every one of them works here.
 - **No macOS build yet.**
 
 ## Coming next
 
-A crosshair for when you're aiming a throw, so you can actually see where things will land.
+An "Always show HUD" option, so your health, lives and cash stay on screen.
 
 ## Building it yourself
 
