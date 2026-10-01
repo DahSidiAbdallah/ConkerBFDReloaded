@@ -96,11 +96,11 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Linux build.** It builds and runs the game at full speed, and draws correctly, but I've only
   run it inside WSL on Windows with software graphics. Real Linux hardware, controllers and sound
   are untested. Please report how it goes.
-- **HD Icons texture pack** (separate, not part of the download). I've made a pack that gives the HUD,
-  menus and on-screen text sharp hand-drawn versions, based on GameBeast92's 4K pack with the
-  original colours and shapes kept. It isn't included because it's built on someone else's
-  artwork. Many of its pictures were matched straight from the game files and haven't been
-  seen in-game yet, so a few might not show up or might look slightly off.
+- **HD Icons texture pack** (optional download on the [Releases](../../releases) page). It gives the
+  HUD, menus and on-screen text sharp hand-drawn versions, using GameBeast92's 4K textures with
+  the original game's colours and shapes kept. Many of its pictures were matched straight from
+  the game files and haven't been seen in-game yet, so a few might not show up or might look
+  slightly off. See [HD Icons](#hd-icons-texture-pack) below.
 
 ### From CBFD-Recompiled
 
@@ -110,6 +110,23 @@ options, camera turning speed and invert, multiple controllers for multiplayer, 
 buttons, and a long list of fixes (the sky crash on wide screens, doors clipping in widescreen,
 the drunk-effect smear, cutscene camera cuts, speech bubbles, light glows, and more). Files taken
 from their project say so at the top.
+
+## HD Icons texture pack
+
+<p align="center"><img src="docs/hd_icons.jpg" width="90%"></p>
+
+An optional pack that makes the 2D pictures sharp: the HUD, the pause screen, menu buttons and
+titles, the bar's signs, chapter names, the legal screen's text and logos. It's built from
+GameBeast92's 4K Ultimate Texture Pack, but wherever that pack recoloured or redrew something,
+the original game's colours and shapes are put back, so it still looks like Conker, just sharper.
+
+To install it, download `ConkerBFDReloaded-HD-Icons` (`.rtz`) from the [Releases](../../releases)
+page, then in the game open the settings, go to **Mods**, click **Install Mods** and pick the file.
+You can switch it on and off there any time, even while playing.
+
+Textures by [GameBeast92](https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k-Ultimate-Texture-Pack),
+used and modified under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The pack is
+shared under the same license, and the `LICENSE.txt` inside it lists what was changed.
 
 ## Known issues
 
@@ -164,8 +181,8 @@ None of this would exist without the people whose work it's built on:
 - **[N64Recomp, N64ModernRuntime and RecompFrontend](https://github.com/N64Recomp)** by Wiseguy
   and contributors.
 - **[RT64](https://github.com/rt64/rt64)** by Darío and contributors, the renderer.
-- **[GameBeast92's 4K Ultimate Texture Pack](https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k-Ultimate-Texture-Pack)**,
-  the artwork behind the optional HD Icons pack.
+- **[GameBeast92's 4K Ultimate Texture Pack](https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k-Ultimate-Texture-Pack)**
+  (CC BY 4.0), the textures behind the optional HD Icons pack.
 - GLideN64 and Rice Video, whose texture fingerprints are how texture packs get matched.
 - Fonts: Inter, Noto Emoji, Luckiest Guy, Coming Soon, Poppins (SIL Open Font License) and
   PromptFont.

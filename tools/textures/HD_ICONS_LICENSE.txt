@@ -1,0 +1,24 @@
+HD Icons for Conker's Bad Fur Day: Reloaded
+===========================================
+
+Pack by dahmedvall95.
+
+Textures by GameBeast92, from the Conker's Bad Fur Day 4K Ultimate Texture Pack:
+https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k-Ultimate-Texture-Pack
+Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+This pack is a modified version of those textures, and is shared under the same
+license (CC BY 4.0). Changes made:
+- Only the 2D pictures are used (HUD, menus, on-screen text and logos).
+- Colours the original pack changed are put back to the original game's colours
+  (e.g. the buttons' green lettering, the PAUSED title's purple and gold).
+- Shapes added that the original game doesn't have are removed (e.g. dots after QUIT).
+- Pictures the game draws in several pieces are joined before processing, so the
+  pieces line up without seams.
+- The glowing (selected) button pictures are remade from the sharp normal ones.
+- The Dolby and Nintendo logos are the original pictures redrawn with clean edges.
+- Pictures are resized to at most 8 times the original size.
+
+Conker's Bad Fur Day and its original artwork are (c) Rare / Microsoft. This is a
+fan-made pack, not affiliated with or endorsed by them.
