@@ -51,7 +51,7 @@ with `./ConkerBFDReloaded --rom /path/to/conker.z64`. It's remembered after that
 camera, the original lighting and shading. You get the higher resolution and nothing else changes.
 
 **Modern** turns on widescreen, the smooth frame rate, sharper 2D graphics, smooth shading, the
-free camera with auto-follow, the aiming crosshair, the saving icon, hold-to-skip cutscenes,
+free camera with auto-follow, the aiming crosshair, the autosave icon, hold-to-skip cutscenes,
 pausing when you alt-tab, Skip Intro and direct mouse aiming.
 
 While Classic or Modern is picked, the settings it decides are greyed out. Pick **Custom** to
@@ -79,13 +79,16 @@ change any of them yourself.
 - **Aiming crosshair.** A red dot shows where a throw will land when Conker aims (the knives in
   the barn, throwables, the magnum). It's lined up with where the game actually throws, and it
   stays out of the way when you just hold R to look around. The original has none.
-- **Saving icon.** A little Conker head in the corner while the game saves, like modern games.
+- **Autosave icon.** A little Conker head in the corner while the game saves, like modern games.
+- **Show Cash.** Your cash on screen during play, drawn exactly like the pause screen's (the wad of
+  bills with eyes and the gold numbers), in the top-right corner. It counts up or down with a little
+  animation when your cash changes. Show it only when it changes, or all the time.
 - **Hold to skip cutscenes.** Hold L to skip any cutscene, even the first time you see it and the
   ones the original never lets you skip. A ring fills while you hold, so you can't skip by accident.
 - **Free camera with auto-follow.** Turn the camera with the right stick or the mouse; it eases back
   behind Conker while he runs.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
-  turn off the motion blur, keep your health on screen, make the tail spin last longer, and pause
+  turn off the motion blur, keep your health and cash on screen, make the tail spin last longer, and pause
   the game when you alt-tab.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
   resolutions you could see thin lines where they met (PLAY, PAUSED and so on). They're joined
@@ -156,7 +159,8 @@ shared under the same license, and the `LICENSE.txt` inside it lists what was ch
 
 ## Coming next
 
-Keeping the cash and lives on screen too, alongside the health.
+Keeping the lives (the tail) on screen too, alongside the health and cash, and I'm looking into a 2D
+minimap.
 
 ## Building it yourself
 

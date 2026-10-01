@@ -1,6 +1,6 @@
 // Quality-of-life options (Conker tab):
 //
-// - Saving Icon: Conker's head, pulsing and rocking, in the bottom-right corner while the game saves
+// - Autosave Icon: Conker's head, pulsing and rocking, in the bottom-right corner while the game saves
 //   (the save file in the settings folder changes; the runtime writes it as the game writes its
 //   EEPROM, at checkpoints and on the save menu).
 // - Pause When Unfocused: while the window doesn't have the keyboard (alt-tab, another window
@@ -78,7 +78,7 @@ namespace {
         return testing;
     }
 
-    // Saving Icon.
+    // Autosave Icon.
     constexpr auto icon_time = std::chrono::milliseconds(2000);
     constexpr auto check_every = std::chrono::milliseconds(250);
     std::atomic<bool> ui_ready = false;
@@ -300,10 +300,10 @@ uint16_t conker::qol::apply_toggles(uint16_t buttons) {
 // frame while a cutscene plays. Holding L for hold_seconds skips; a skip the game decided by itself
 // (not from a button: the bar's walk-in after Skip Intro) is kept; a press alone does nothing.
 extern "C" void conker_skip_cutscene_result(uint8_t* rdram, recomp_context* ctx) {
+    cutscene_seen = ticks(); // (the cash counter hides during cutscenes too, cash_hud.cpp)
     if (!conker::qol::skip_any_cutscene()) {
         return;
     }
-    cutscene_seen = ticks();
     const uint16_t pressed = (uint16_t)MEM_HU(0, (gpr)(int32_t)0x800BE710); // this frame's new presses
     const bool by_itself = ctx->r2 != 0 && (pressed & (button_l | button_start)) == 0;
     const bool held = (player_buttons.load() & button_l) != 0;
@@ -325,6 +325,10 @@ extern "C" void conker_skip_cutscene_result(uint8_t* rdram, recomp_context* ctx)
         return;
     }
     ctx->r2 = by_itself ? 1 : 0;
+}
+
+bool conker::qol::cutscene_playing() {
+    return seconds_since(cutscene_seen.load()) < 0.25;
 }
 
 // Reduce Motion Effects: func_151D6778 draws the motion blur (Conker drunk at the start of the game:

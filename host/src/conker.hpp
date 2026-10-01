@@ -106,7 +106,7 @@ namespace conker {
     namespace qol {
         void init();          // frontend.cpp, once SDL is up
         void on_ui_ready();   // frontend.cpp, from the launcher's init
-        void update();        // main thread (update_gfx): the Saving Icon
+        void update();        // main thread (update_gfx): the Autosave Icon
         void on_vi();         // every VI: Pause When Unfocused holds the game here
         void set_player_buttons(uint16_t buttons); // player 1's own buttons (Skip Any Cutscene's hold)
         uint16_t apply_toggles(uint16_t buttons); // player 1's buttons: Toggle R-Look / Crouch
@@ -118,7 +118,9 @@ namespace conker {
         bool toggle_crouch();
         bool reduce_motion();
         bool always_show_hud();
+        int cash_counter(); // 0 off, 1 when it changes, 2 always (cash_hud.cpp)
         bool longer_spin();
+        bool cutscene_playing(); // the game's cutscene skip check ran in the last quarter second
         void longer_spin_on_vi(uint8_t* rdram);
         void on_vi_memory(uint8_t* rdram); // every VI, with the game's memory: Always Show HUD
     }

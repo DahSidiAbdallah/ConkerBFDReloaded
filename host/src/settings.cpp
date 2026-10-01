@@ -31,6 +31,7 @@ namespace {
     // qol.cpp's options.
     std::atomic<bool> saving_icon_on{ true }, pause_unfocused_on{ true }, skip_cutscene_on{ false };
     std::atomic<bool> toggle_r_on{ false }, toggle_z_on{ false }, reduce_motion_on{ false }, always_hud_on{ false }, longer_spin_on{ false };
+    std::atomic<int> cash_counter_mode{ 0 };
 
     enum class Experience : uint32_t { Classic, Modern, Custom };
 
@@ -298,7 +299,7 @@ namespace {
                     *target = std::get<bool>(cur);
                 });
         };
-        add_bool("saving_icon", "Saving Icon",
+        add_bool("saving_icon", "Autosave Icon",
             "Shows Conker's head in the bottom-right corner while the game saves (at checkpoints and on the save "
             "menu), as modern games do. The original game shows none.", true, &saving_icon_on);
         add_bool("skip_any_cutscene", "Skip Any Cutscene",
@@ -327,6 +328,15 @@ namespace {
         add_bool("always_show_hud", "Always Show Health",
             "Keeps Conker's health (the chocolate) on screen all the time during play, instead of only for a few "
             "seconds after it changes.", false, &always_hud_on);
+        accessibility.add_enum_option("cash_counter", "Show Cash",
+            "Shows how much cash Conker has during play, drawn just as on the pause screen (the wad of bills and the "
+            "gold numbers), counting up or down when it changes. The original game only shows it on the pause screen. "
+            "When It Changes shows it for a few seconds after you get or spend cash; Always keeps it on screen.",
+            { { 0u, "Off", "Off" }, { 1u, "WhenItChanges", "When It Changes" }, { 2u, "Always", "Always" } }, 0u);
+        accessibility.add_option_change_callback("cash_counter",
+            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                cash_counter_mode = (int)std::get<uint32_t>(cur);
+            });
         add_bool("longer_tail_spin", "Longer Tail Spin",
             "When Conker spins his tail after a jump (press A again in the air), he floats up for longer and glides "
             "down more slowly. Off matches the original game. It lets you glide further than the levels were made for.",
@@ -450,4 +460,5 @@ bool conker::qol::toggle_r_look() { return toggle_r_on; }
 bool conker::qol::toggle_crouch() { return toggle_z_on; }
 bool conker::qol::reduce_motion() { return reduce_motion_on; }
 bool conker::qol::always_show_hud() { return always_hud_on; }
+int conker::qol::cash_counter() { return cash_counter_mode; }
 bool conker::qol::longer_spin() { return longer_spin_on; }

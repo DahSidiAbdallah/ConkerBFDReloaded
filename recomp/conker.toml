@@ -743,3 +743,16 @@ text = "{ extern void conker_widen_glow_left(uint8_t*, recomp_context*); conker_
 func = "func_151408A4"
 before_vram = 0x151409A0
 text = "{ extern void conker_widen_glow_right(uint8_t*, recomp_context*); conker_widen_glow_right(rdram, ctx); }"
+
+# Show Cash (host/src/cash_hud.cpp): the pause screen's cash display drawn during play, at the end
+# of the HUD (after func_15096934; $v0 is the display list), and dropped when a level load starts
+# the HUD afresh (func_15017640).
+[[patches.hook]]
+func = "func_1508FD38"
+before_vram = 0x15090088
+text = "{ extern void conker_cash_hud(uint8_t*, recomp_context*); conker_cash_hud(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_15017640"
+before_vram = 0x15017640
+text = "{ extern void conker_cash_hud_reset(uint8_t*, recomp_context*); conker_cash_hud_reset(rdram, ctx); }"

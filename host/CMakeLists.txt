@@ -19,7 +19,7 @@ endif()
 # The version: shown in the launcher and in the exe's Properties. A suffix (e.g. "-beta") marks test builds.
 set(CONKER_VERSION_MAJOR 1)
 set(CONKER_VERSION_MINOR 1)
-set(CONKER_VERSION_PATCH 1)
+set(CONKER_VERSION_PATCH 2)
 set(CONKER_VERSION_SUFFIX "")
 set(CONKER_VERSION_STRING "${CONKER_VERSION_MAJOR}.${CONKER_VERSION_MINOR}.${CONKER_VERSION_PATCH}${CONKER_VERSION_SUFFIX}")
 configure_file(src/version.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/version.h" @ONLY)
@@ -68,6 +68,7 @@ add_executable(ConkerBFDReloaded
     src/field_of_view.cpp
     src/crosshair.cpp
     src/qol.cpp
+    src/cash_hud.cpp
     src/look_aim.cpp
     src/rumble.cpp
     src/interpolation.cpp
