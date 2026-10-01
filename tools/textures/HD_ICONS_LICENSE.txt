@@ -18,6 +18,8 @@ license (CC BY 4.0). Changes made:
   pieces line up without seams.
 - The glowing (selected) button pictures are remade from the sharp normal ones.
 - The Dolby and Nintendo logos are the original pictures redrawn with clean edges.
+- The save menu's NEW GAME button keeps the pack's frame with its lettering redrawn
+  (the pack has no HD version of it).
 - Pictures are resized to at most 8 times the original size.
 
 Conker's Bad Fur Day and its original artwork are (c) Rare / Microsoft. This is a

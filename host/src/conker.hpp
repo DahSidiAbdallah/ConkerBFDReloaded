@@ -117,6 +117,10 @@ namespace conker {
         bool toggle_r_look();
         bool toggle_crouch();
         bool reduce_motion();
+        bool always_show_hud();
+        bool longer_spin();
+        void longer_spin_on_vi(uint8_t* rdram);
+        void on_vi_memory(uint8_t* rdram); // every VI, with the game's memory: Always Show HUD
     }
 
     // fps_counter.cpp: Show FPS, the frame rate counter (from CBFD-Recompiled V0.1.5).

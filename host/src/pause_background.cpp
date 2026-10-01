@@ -98,9 +98,10 @@ extern "C" void conker_pause_background(uint8_t* rdram, recomp_context* ctx) {
 extern "C" void conker_pause_background_blur(uint8_t* rdram, recomp_context* ctx) {
     conker_probe_pause(rdram, ctx, 3);
     const gpr picture = ctx->r4;
-    // Only while the blank columns are there: RT64 draws them when it opens the scissors' border
-    // (rt64_conker_open_scissor_border, scene_fixes.cpp).
-    if (!kept_frame_wide || rt64_conker_open_scissor_border || (uint32_t)picture != (uint32_t)MEM_W(0, (int32_t)0x800BE9C4)) {
+    // Always, for the squeezed frame the pause keeps: even with the scissors' border opened
+    // (rt64_conker_open_scissor_border, scene_fixes.cpp) the copy's last two columns were left with
+    // other pixels, a thin smeared band at the window's right edge once stretched.
+    if (!kept_frame_wide || (uint32_t)picture != (uint32_t)MEM_W(0, (int32_t)0x800BE9C4)) {
         return;
     }
     const int32_t width = MEM_W(0, (int32_t)0x800BE620), height = MEM_W(0, (int32_t)0x800BE624); // D_800BE620/4

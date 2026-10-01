@@ -82,9 +82,11 @@ change any of them yourself.
 - **Saving icon.** A little Conker head in the corner while the game saves, like modern games.
 - **Hold to skip cutscenes.** Hold L to skip any cutscene, even the first time you see it and the
   ones the original never lets you skip. A ring fills while you hold, so you can't skip by accident.
-- **Pause when you alt-tab.** The game waits for you while its window isn't the one you're using.
-- **Accessibility options:** press R or Z once to look around or crouch instead of holding them,
-  and Reduce Motion Effects turns off the motion blur.
+- **Free camera with auto-follow.** Turn the camera with the right stick or the mouse; it eases back
+  behind Conker while he runs.
+- **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
+  turn off the motion blur, keep your health on screen, make the tail spin last longer, and pause
+  the game when you alt-tab.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
   resolutions you could see thin lines where they met (PLAY, PAUSED and so on). They're joined
   smoothly now.
@@ -96,14 +98,13 @@ change any of them yourself.
 These are my own additions that work, but haven't been tested everywhere yet. If something looks or
 feels off, please [open an issue](../../issues). That's exactly the feedback I'm after.
 
-- **Free camera with auto-follow** (right stick or mouse). It works wherever the game's normal
-  follow camera runs. I've tested it in the early levels with keyboard and touchpad. How it feels
-  on a real mouse and on a controller still needs checking, and so does the mouse-wheel zoom.
 - **Smooth shading.** Lighting worked out per pixel instead of per corner, so torch light looks
   round and soft. I checked that it matches the original's brightness in the areas I tested,
   but not across the whole game.
 - **The crosshair with other weapons.** It's lined up and tested with the knives in the barn. With
   other throwables and the magnum it sits in the middle of the screen, which I haven't checked yet.
+- **Light glows near the screen edges.** In widescreen they used to vanish toward the sides; they
+  should stay now, but I haven't seen one in-game yet.
 - **Frame rates above 60.** Smooth 60 fps is tested. I couldn't test 120 Hz and up because I don't
   have a screen that goes that high.
 - **Linux build.** It builds and runs the game at full speed, and draws correctly, but I've only
@@ -145,21 +146,17 @@ shared under the same license, and the `LICENSE.txt` inside it lists what was ch
 
 ## Known issues
 
-- **Lighting near the edges in widescreen.** With more of the room visible, the game sometimes
-  picks different torches to light an object than it would in 4:3, so a few objects near the
-  sides can look a little brighter or darker than on the N64. Classic (4:3) isn't affected.
 - **The free camera stays out of fixed-camera spots.** Places where the game uses a fixed camera
   (some doorways, the Windy barn) keep it. That's on purpose. The free camera can also end up
   behind crates and other objects, just like the game's own camera.
 - **Controls feel like the original.** The game still runs its logic at 30 fps like on the N64. The
   smooth frame rate makes it look smoother, but Conker handles exactly the way he always did.
-- **Light glows at the screen edges** can fade out toward the left and right sides in widescreen.
 - **Mods made for CBFD-Recompiled** load, but I haven't checked that every one of them works here.
 - **No macOS build yet.**
 
 ## Coming next
 
-An "Always show HUD" option, so your health, lives and cash stay on screen.
+Keeping the cash and lives on screen too, alongside the health.
 
 ## Building it yourself
 

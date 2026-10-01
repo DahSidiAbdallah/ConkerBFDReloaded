@@ -30,7 +30,7 @@ namespace {
     std::atomic<bool> crosshair_on{ true };
     // qol.cpp's options.
     std::atomic<bool> saving_icon_on{ true }, pause_unfocused_on{ true }, skip_cutscene_on{ false };
-    std::atomic<bool> toggle_r_on{ false }, toggle_z_on{ false }, reduce_motion_on{ false };
+    std::atomic<bool> toggle_r_on{ false }, toggle_z_on{ false }, reduce_motion_on{ false }, always_hud_on{ false }, longer_spin_on{ false };
 
     enum class Experience : uint32_t { Classic, Modern, Custom };
 
@@ -122,7 +122,7 @@ namespace {
     // resolution, 4x anti-aliasing, smooth textures, 2D and shading, straight to the save menu, the free
     // camera with auto-follow, and the mouse turning the camera and aiming directly. Settings that
     // are about the player's hands or controller (invert, turning speed, rumble, gyro) are left alone.
-    enum class Tab { Graphics, Conker, General };
+    enum class Tab { Graphics, Conker, Accessibility, General };
     struct PresetSetting {
         Tab tab;
         std::string id;
@@ -149,7 +149,7 @@ namespace {
                 { Tab::Conker, "camera_auto_follow", V{ true }, V{ true } },
                 { Tab::Conker, "aiming_crosshair", V{ false }, V{ true } },
                 { Tab::Conker, "saving_icon", V{ false }, V{ true } },
-                { Tab::Conker, "pause_unfocused", V{ false }, V{ true } },
+                { Tab::Accessibility, "pause_unfocused", V{ false }, V{ true } },
                 { Tab::Conker, "skip_any_cutscene", V{ false }, V{ true } },
                 { Tab::General, recompui::config::general::options::mouse_sensitivity, V{ 0.0 }, V{ 50.0 } },
                 { Tab::General, "look_mouse_response", e(0u /* Smooth */), e(1u /* Direct */) },
@@ -164,6 +164,7 @@ namespace {
         switch (tab) {
             case Tab::Graphics: return recompui::config::get_graphics_config();
             case Tab::General: return recompui::config::get_general_config();
+            case Tab::Accessibility: return recompui::config::get_config("accessibility");
             case Tab::Conker: default: return recompui::config::get_config("conker");
         }
     }
@@ -195,7 +196,7 @@ namespace {
             return;
         }
         syncing_experience = true;
-        for (Tab tab : { Tab::Graphics, Tab::Conker, Tab::General }) {
+        for (Tab tab : { Tab::Graphics, Tab::Conker, Tab::Accessibility, Tab::General }) {
             recomp::config::Config& config = tab_config(tab);
             bool changed = false;
             for (const PresetSetting& setting : preset_settings()) {
@@ -222,6 +223,7 @@ namespace {
         apply_experience(saved);
         if (saved != Experience::Custom) {
             recompui::config::get_config("conker").save_config();
+            recompui::config::get_config("accessibility").save_config();
             recompui::config::get_general_config().save_config();
         }
     }
@@ -247,6 +249,7 @@ namespace {
                     // The player picked one.
                     apply_experience((Experience)std::get<uint32_t>(cur));
                     recompui::config::get_config("conker").save_config();
+                    recompui::config::get_config("accessibility").save_config();
                     recompui::config::get_general_config().save_config();
                 }
             });
@@ -298,20 +301,39 @@ namespace {
         add_bool("saving_icon", "Saving Icon",
             "Shows Conker's head in the bottom-right corner while the game saves (at checkpoints and on the save "
             "menu), as modern games do. The original game shows none.", true, &saving_icon_on);
-        add_bool("pause_unfocused", "Pause When Unfocused",
-            "Pauses the game while its window isn't the one you're using (after alt-tab, or clicking another window), "
-            "and carries on when you come back.", true, &pause_unfocused_on);
         add_bool("skip_any_cutscene", "Skip Any Cutscene",
             "Hold L to skip any cutscene, even the first time you see it (the original only lets you skip ones you've "
             "watched before), including the ones it never lets you skip, like the opening. \"Hold to Skip\" shows in "
             "the corner with a ring that fills while you hold; a quick press doesn't skip.", false, &skip_cutscene_on);
-        add_bool("reduce_motion", "Reduce Motion Effects",
-            "Accessibility: turns off the motion blur (the ghostly trails while Conker is drunk at the start of the "
-            "game), which can cause motion sickness.", false, &reduce_motion_on);
+    }
+
+    // The Accessibility tab: options that make the game easier to see, play and control.
+    void create_accessibility_tab() {
+        recomp::config::Config& accessibility = recompui::config::create_config_tab("Accessibility", "accessibility", false);
+        auto add_bool = [&accessibility](const char* id, const char* name, const char* about, bool fallback, std::atomic<bool>* target) {
+            accessibility.add_bool_option(id, name, about, fallback);
+            accessibility.add_option_change_callback(id,
+                [target](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                    *target = std::get<bool>(cur);
+                });
+        };
         add_bool("toggle_r_look", "Toggle R-Look",
-            "Accessibility: press R once to look around and again to stop, instead of holding it.", false, &toggle_r_on);
+            "Press R once to look around and again to stop, instead of holding it.", false, &toggle_r_on);
         add_bool("toggle_crouch", "Toggle Crouch",
-            "Accessibility: press Z once to crouch and again to stand, instead of holding it.", false, &toggle_z_on);
+            "Press Z once to crouch and again to stand, instead of holding it.", false, &toggle_z_on);
+        add_bool("reduce_motion", "Reduce Motion Effects",
+            "Turns off the motion blur (the ghostly trails while Conker is drunk at the start of the "
+            "game), which can cause motion sickness.", false, &reduce_motion_on);
+        add_bool("always_show_hud", "Always Show Health",
+            "Keeps Conker's health (the chocolate) on screen all the time during play, instead of only for a few "
+            "seconds after it changes.", false, &always_hud_on);
+        add_bool("longer_tail_spin", "Longer Tail Spin",
+            "When Conker spins his tail after a jump (press A again in the air), he floats up for longer and glides "
+            "down more slowly. Off matches the original game. It lets you glide further than the levels were made for.",
+            false, &longer_spin_on);
+        add_bool("pause_unfocused", "Pause When Unfocused",
+            "Pauses the game while its window isn't the one you're using (after alt-tab, or clicking another window), "
+            "and carries on when you come back.", true, &pause_unfocused_on);
     }
 
     void describe_controls() {
@@ -343,6 +365,7 @@ void conker::init_settings() {
         std::filesystem::create_directories(app_folder);
     }
     create_conker_tab();
+    create_accessibility_tab();
     recompui::config::GeneralTabOptions general{};
     // Rumble strength and the gyro and mouse sensitivities are added by rumble.cpp and
     // look_aim.cpp instead (CBFD-Recompiled), with the same ids, each next to the settings it
@@ -426,3 +449,5 @@ bool conker::qol::skip_any_cutscene() { return skip_cutscene_on; }
 bool conker::qol::toggle_r_look() { return toggle_r_on; }
 bool conker::qol::toggle_crouch() { return toggle_z_on; }
 bool conker::qol::reduce_motion() { return reduce_motion_on; }
+bool conker::qol::always_show_hud() { return always_hud_on; }
+bool conker::qol::longer_spin() { return longer_spin_on; }

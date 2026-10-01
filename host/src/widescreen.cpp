@@ -106,6 +106,18 @@ namespace {
 // func_15130A9C at 0x15130CEC / 0x15130D08: $f6 and $f10 hold the camera's left
 // and right sprite bounds (camera + 0x2C / + 0x30), about to be compared with the
 // sprite's right and left edges.
+// Light glows (func_151408A4): before drawing one, the game checks its light's screen position
+// against the camera's picture (camera + 0x2C to + 0x30 across, the 4:3 frame), and drops the glow
+// outside it. In widescreen the picture is wider, so lights in the sides lost their glows. The
+// left bound ($f10, at 0x15140988) and the right one ($f4, at 0x151409A0) move out as the sprites'.
+extern "C" void conker_widen_glow_left(uint8_t* rdram, recomp_context* ctx) {
+    ctx->f10.fl -= sprite_cull_margin(rdram) - 8.0f;
+}
+
+extern "C" void conker_widen_glow_right(uint8_t* rdram, recomp_context* ctx) {
+    ctx->f4.fl += sprite_cull_margin(rdram) - 8.0f;
+}
+
 extern "C" void conker_widen_sprite_cull_left(uint8_t* rdram, recomp_context* ctx) {
     ctx->f6.fl -= sprite_cull_margin(rdram);
 }

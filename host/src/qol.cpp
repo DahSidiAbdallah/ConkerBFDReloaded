@@ -12,6 +12,8 @@
 //   func_1501E05C (the game's "skip the playing cutscene?" check) returns, recomp/conker.toml.
 // - Reduce Motion Effects: no motion blur (the drunk ghosting at the start of the game), for players
 //   who get motion sick.
+// - Always Show Health: health (chocolate) stays on screen instead of sliding away.
+// - Longer Tail Spin: the spin after a jump (A twice) floats and glides for longer.
 // - Toggle R-Look and Toggle Crouch: a press of R or Z holds it until the next press, for players
 //   who can't hold a button down.
 
@@ -19,7 +21,10 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -47,7 +52,16 @@ namespace {
     // Pause When Unfocused.
     std::atomic<bool> window_focused{ true };
 
+
+    // Testing aid, only with a file named capture_enabled in the settings folder: F9 saves a snapshot
+    // of the game's memory there (memory_<n>.rdram), to find things only a real moment of play shows
+    // (e.g. the cash display's timer for Always Show HUD).
+    std::atomic<int> capture_requests{ 0 };
+
     int SDLCALL watch_focus(void*, SDL_Event* event) {
+        if (event->type == SDL_KEYDOWN && event->key.keysym.scancode == SDL_SCANCODE_F9 && !event->key.repeat) {
+            capture_requests++;
+        }
         if (event->type == SDL_WINDOWEVENT) {
             if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
                 window_focused = true;
@@ -319,5 +333,59 @@ extern "C" void conker_skip_cutscene_result(uint8_t* rdram, recomp_context* ctx)
 extern "C" void conker_motion_blur(uint8_t* rdram, recomp_context* ctx) {
     if (conker::qol::reduce_motion()) {
         ctx->r3 = 0;
+    }
+}
+
+// Always Show Health: the chocolate (health) display slides in when health changes and away again when
+// its timer, D_800D2444 (frames, set to 240 by func_1508F0D4 on a change), runs out. Kept topped up,
+// it stays on screen.
+void conker::qol::on_vi_memory(uint8_t* rdram) {
+    if (rdram == nullptr) {
+        return;
+    }
+    if (capture_requests.load() > 0) {
+        capture_requests--;
+        static const bool enabled = std::filesystem::exists(recomp::get_config_path() / "capture_enabled");
+        static int count = 0;
+        if (enabled) {
+            const std::filesystem::path path = recomp::get_config_path() / ("memory_" + std::to_string(++count) + ".rdram");
+            if (FILE* f = std::fopen(path.string().c_str(), "wb")) {
+                std::fwrite(rdram, 1, 8 * 1024 * 1024, f);
+                std::fclose(f);
+            }
+        }
+    }
+    conker::qol::longer_spin_on_vi(rdram);
+    if (!conker::qol::always_show_hud()) {
+        return;
+    }
+    MEM_W(0, (gpr)(int32_t)0x800D2444) = 240;
+}
+
+
+// Longer Tail Spin: pressing A again in a jump makes Conker spin his tail: his upward speed (his
+// object's + 0x20, D_800CC2D0 is player 1's) is set to 7 and his gravity (+ 0x24) to 1.0, which stays
+// until he lands (a jump's is 6.2, standing 5.0). He floats up and glides down. With the option on,
+// while he spins (gravity exactly 1.0 or ours, in the air) gravity is lower and he falls more slowly,
+// so the spin lasts longer. Set once per VI: the game keeps the value until he lands.
+namespace {
+    constexpr uint32_t player_object = 0x800CC2D0;
+    constexpr float spin_gravity = 1.0f, longer_gravity = 0.55f, longer_fall_speed = -6.0f;
+}
+
+void conker::qol::longer_spin_on_vi(uint8_t* rdram) {
+    if (!conker::qol::longer_spin()) {
+        return;
+    }
+    const gpr object = (gpr)(int32_t)player_object;
+    auto read = [&](int offset) { uint32_t w = (uint32_t)MEM_W(offset, object); float f; std::memcpy(&f, &w, 4); return f; };
+    auto write = [&](int offset, float f) { uint32_t w; std::memcpy(&w, &f, 4); MEM_W(offset, object) = (int32_t)w; };
+    const float gravity = read(0x24), height = read(0x28);
+    if (height <= 0.0f || (gravity != spin_gravity && gravity != longer_gravity)) {
+        return;
+    }
+    write(0x24, longer_gravity);
+    if (read(0x20) < longer_fall_speed) {
+        write(0x20, longer_fall_speed);
     }
 }

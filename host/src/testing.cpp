@@ -73,12 +73,17 @@ extern "C" volatile int rt64_cbfd_log_window; // rt64_rsp.cpp (testing)
 
 void conker::testing::on_vi(uint8_t* rdram) {
     uint32_t now = ++vis;
-    // CONKER_TEST_CASH=seconds: adds $1 to player 1's cash then (0x800D2148, as the CBFD cheats
-    // mod), to make the game show its HUD (finding the HUD's timer).
-    static const double test_cash_at = std::getenv("CONKER_TEST_CASH") ? std::atof(std::getenv("CONKER_TEST_CASH")) : -1.0;
-    if (test_cash_at > 0 && rdram != nullptr && now == (uint32_t)(test_cash_at * 60.0)) {
-        MEM_W(0, (int32_t)0x800D2148) = MEM_W(0, (int32_t)0x800D2148) + 1;
-        std::printf("[testing] cash +1\n");
+    // CONKER_TEST_POKE=seconds:hexaddress:delta: adds delta to the byte at that address then (e.g. player 1's
+    // lives, 0x800D2144), to make the game show its HUD (finding the HUD's timers).
+    static double poke_at = -1.0; static uint32_t poke_addr = 0; static int poke_delta = 0;
+    static const bool poke_parsed = [] {
+        if (const char* p = std::getenv("CONKER_TEST_POKE")) { std::sscanf(p, "%lf:%x:%d", &poke_at, &poke_addr, &poke_delta); }
+        return true;
+    }();
+    (void)poke_parsed;
+    if (poke_at > 0 && rdram != nullptr && now == (uint32_t)(poke_at * 60.0)) {
+        MEM_B(0, (gpr)(int32_t)poke_addr) = (int8_t)(MEM_B(0, (gpr)(int32_t)poke_addr) + poke_delta);
+        std::printf("[testing] poke %08X += %d\n", poke_addr, poke_delta);
     }
     // CONKER_LOG_WINDOW=room:from:to (hex room, room timer): turn on RT64's lighting record
     // (RT64_CBFD_VTXLIGHT_LOG) for those frames only.

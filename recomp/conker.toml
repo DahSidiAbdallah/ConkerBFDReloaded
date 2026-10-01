@@ -731,3 +731,15 @@ text = "{ extern void conker_skip_cutscene_result(uint8_t*, recomp_context*); co
 func = "func_151D6778"
 before_vram = 0x151D6798
 text = "{ extern void conker_motion_blur(uint8_t*, recomp_context*); conker_motion_blur(rdram, ctx); }"
+
+# Widescreen: light glows (func_151408A4) are dropped outside the camera's 4:3 picture; its left and
+# right bounds move out to the window's (host/src/widescreen.cpp).
+[[patches.hook]]
+func = "func_151408A4"
+before_vram = 0x15140988
+text = "{ extern void conker_widen_glow_left(uint8_t*, recomp_context*); conker_widen_glow_left(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_151408A4"
+before_vram = 0x151409A0
+text = "{ extern void conker_widen_glow_right(uint8_t*, recomp_context*); conker_widen_glow_right(rdram, ctx); }"
