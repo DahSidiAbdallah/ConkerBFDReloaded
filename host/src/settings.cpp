@@ -26,7 +26,6 @@ namespace {
 
     std::atomic<bool> skip_intro_enabled{ false };
     std::atomic<bool> free_camera{ true };
-    std::atomic<bool> auto_follow{ true };
     std::atomic<bool> crosshair_on{ true };
     // qol.cpp's options.
     std::atomic<bool> saving_icon_on{ true }, pause_unfocused_on{ true }, skip_cutscene_on{ false };
@@ -147,7 +146,6 @@ namespace {
                 { Tab::Graphics, extra::screen_filter, e(ScreenFilter::Sharp), std::nullopt },
                 { Tab::Conker, "skip_intro", V{ false }, V{ true } },
                 { Tab::Conker, "free_camera", V{ false }, V{ true } },
-                { Tab::Conker, "camera_auto_follow", V{ true }, V{ true } },
                 { Tab::Conker, "aiming_crosshair", V{ false }, V{ true } },
                 { Tab::Conker, "saving_icon", V{ false }, V{ true } },
                 { Tab::Accessibility, "pause_unfocused", V{ false }, V{ true } },
@@ -273,15 +271,6 @@ namespace {
         conker.add_option_change_callback("free_camera",
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
                 free_camera = std::get<bool>(cur);
-            });
-        conker.add_bool_option(
-            "camera_auto_follow", "Camera Auto-Follow",
-            "With the Free Camera: once you haven't turned the camera for a moment, it eases back behind Conker "
-            "while he moves. Off, it stays wherever you leave it.",
-            true);
-        conker.add_option_change_callback("camera_auto_follow",
-            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
-                auto_follow = std::get<bool>(cur);
             });
         conker.add_bool_option(
             "aiming_crosshair", "Aiming Crosshair",
@@ -431,11 +420,6 @@ float conker::camera_turn_speed() {
     return v != nullptr ? (float)(*v / 100.0) : 1.0f;
 }
 
-// Testing aid: CONKER_SKIP_INTRO=1 skips it whatever the setting.
-bool conker::camera_auto_follow() {
-    return auto_follow;
-}
-
 bool conker::free_camera_enabled() {
     return free_camera;
 }
@@ -444,6 +428,7 @@ bool conker::crosshair::enabled() {
     return crosshair_on;
 }
 
+// Testing aid: CONKER_SKIP_INTRO=1 skips it whatever the setting.
 bool conker::skip_intro() {
     static const bool forced = std::getenv("CONKER_SKIP_INTRO") != nullptr;
     return skip_intro_enabled || forced;

@@ -34,6 +34,9 @@
 #include "elements/ui_image.h"
 #include "util/file.h"
 
+#define XXH_INLINE_ALL
+#include "xxhash.h"
+
 #include "conker.hpp"
 
 // recompui's launcher shows the first entry; ui_launcher.cpp declares it extern.
@@ -246,6 +249,53 @@ namespace {
         set(color::Background1, { 0x0B, 0x06, 0x04, 0xFF });
     }
 
+    // The ROM option: shows which ROM is in use ("ROM: Original", "ROM: Uncensored", or "ROM: Modified"
+    // for another hack), and picks another one to play from now on: the US ROM, or a ROM hack of it
+    // that only changes the game's data (main.cpp's accept_rom). It replaces the stored one; saves
+    // and settings stay.
+    constexpr uint64_t uncensored_rom_hash = 0xAC445026C8F77A94ULL; // the uncensored speech hack
+
+    std::string rom_title(const std::filesystem::path& path) {
+        std::ifstream file(path, std::ios::binary);
+        std::vector<char> rom((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        if (rom.empty()) {
+            return "Change ROM";
+        }
+        const uint64_t hash = XXH3_64bits(rom.data(), rom.size());
+        return hash == conker::us_rom_hash ? "ROM: Original" : hash == uncensored_rom_hash ? "ROM: Uncensored" : "ROM: Modified";
+    }
+
+    std::filesystem::path stored_rom_path(const std::u8string& game_id) {
+        return recomp::get_config_path() / (game_id + u8".z64");
+    }
+
+    void change_rom(const std::u8string& game_id, recompui::GameOption* option) {
+        recompui::file::open_file_dialog([game_id, option](bool success, const std::filesystem::path& path) {
+            if (!success) {
+                return;
+            }
+            switch (recomp::select_rom(path, game_id)) {
+                case recomp::RomValidationError::Good: {
+                    const std::string title = rom_title(stored_rom_path(game_id));
+                    recompui::ContextId context = recompui::get_launcher_context_id();
+                    const bool opened = context.open_if_not_already();
+                    option->set_title(title);
+                    if (opened) {
+                        context.close();
+                    }
+                    break;
+                }
+                case recomp::RomValidationError::FailedToOpen:
+                    recompui::message_box("Couldn't open that file.");
+                    break;
+                default:
+                    recompui::message_box("That isn't the US ROM of Conker's Bad Fur Day, or a hack of it that keeps "
+                        "the game's code. Your current ROM is still in use.");
+                    break;
+            }
+        });
+    }
+
     void init_launcher(recompui::LauncherMenu* menu) {
         const recomp::GameEntry& game = supported_games[0];
         menu->remove_default_title();
@@ -261,12 +311,16 @@ namespace {
             recompui::GameOptionsMenuLayout::Right);
         options->set_bottom(6.0f); // a little lower than recompui's 24 px
         recompui::update_game_mod_id(game.mod_game_id);
+        // In the menu's order (options show in the order they're added).
+        recompui::GameOption* start_option = options->add_start_game_or_load_rom_option();
+        recompui::GameOption* controls_option = options->add_setup_controls_option();
+        recompui::GameOption* settings_option = options->add_settings_option();
+        recompui::GameOption* mods_option = options->add_mods_option();
+        static recompui::GameOption* rom_option = nullptr;
+        rom_option = options->add_option(rom_title(stored_rom_path(game.game_id)),
+            [game_id = game.game_id]() { change_rom(game_id, rom_option); });
         recompui::GameOption* entries[] = {
-            options->add_start_game_or_load_rom_option(),
-            options->add_setup_controls_option(),
-            options->add_settings_option(),
-            options->add_mods_option(),
-            options->add_exit_option(),
+            start_option, controls_option, settings_option, mods_option, rom_option, options->add_exit_option(),
         };
         for (recompui::GameOption* entry : entries) {
             entry->set_font_family(title_font);

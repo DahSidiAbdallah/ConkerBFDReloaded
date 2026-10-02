@@ -20,6 +20,11 @@ struct _SDL_GameController;
 namespace conker {
     inline constexpr const char* program_name = "Conker BFD: Reloaded";
     inline constexpr uint64_t us_rom_hash = 0x23FBBA2DBCF2FD8EULL; // XXH3-64 of the US ROM (.z64)
+    // The part of the ROM holding the game's code (.init, .game, .debugger: 0x1000 to the end of
+    // .debugger), and its XXH3-64 in the US ROM. ROM hacks that leave it alone (only the game's
+    // data changed, like the uncensored speech) work with the recompiled code.
+    inline constexpr uint32_t rom_code_start = 0x1000, rom_code_end = 0x25A5D8;
+    inline constexpr uint64_t us_code_hash = 0x55ED54C589E9E0D5ULL;
 
     // segments.cpp: the game's code sections and its TLB-mapped pages.
     void register_code_sections();
@@ -67,7 +72,6 @@ namespace conker {
     }
     bool skip_intro();
     bool free_camera_enabled();
-    bool camera_auto_follow();
     // free_camera.cpp: the right stick for the Free Camera (x right, y up, past the dead zone).
     void free_camera_stick(float* x, float* y);
     // scene_fixes.cpp: Skip Intro's steps.

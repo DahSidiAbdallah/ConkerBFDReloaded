@@ -28,7 +28,8 @@ can mix and match anything in between.
 1. Grab the latest build from the [Releases](../../releases) page: the `Windows.zip` or the
    `Linux.tar.gz`.
 2. Unzip it anywhere and run `ConkerBFDReloaded` (`.exe` on Windows).
-3. The first time, it asks for your ROM. After that it remembers it.
+3. The first time, it asks for your ROM. After that it remembers it. (To use another one later,
+   such as the uncensored ROM hack, use **ROM** in the launcher.)
 4. Open the settings, go to the **Conker** tab and pick **Classic** or **Modern**.
 
 That's it. Your settings and saves live in `%LOCALAPPDATA%\ConkerBFDReloaded` on Windows and in
@@ -51,7 +52,7 @@ with `./ConkerBFDReloaded --rom /path/to/conker.z64`. It's remembered after that
 camera, the original lighting and shading. You get the higher resolution and nothing else changes.
 
 **Modern** turns on widescreen, the smooth frame rate, sharper 2D graphics, smooth shading, the
-free camera with auto-follow, the aiming crosshair, the autosave icon, hold-to-skip cutscenes,
+free camera, the aiming crosshair, the autosave icon, hold-to-skip cutscenes,
 pausing when you alt-tab, Skip Intro and direct mouse aiming.
 
 While Classic or Modern is picked, the settings it decides are greyed out. Pick **Custom** to
@@ -85,14 +86,19 @@ change any of them yourself.
   animation when your cash changes. Show it only when it changes, or all the time.
 - **Hold to skip cutscenes.** Hold L to skip any cutscene, even the first time you see it and the
   ones the original never lets you skip. A ring fills while you hold, so you can't skip by accident.
-- **Free camera with auto-follow.** Turn the camera with the right stick or the mouse; it eases back
-  behind Conker while he runs.
+- **Free camera.** Turn the camera with the right stick or the mouse, and it stays where you put it.
+  It keeps Conker in view: it comes in front of anything between him and the camera (walls, the
+  barn's big posts), rises or turns aside a little where there's no room, and glides back out when
+  there's space. Tilted down, it settles just above the ground.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
   turn off the motion blur, keep your health and cash on screen, make the tail spin last longer, and pause
   the game when you alt-tab.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
   resolutions you could see thin lines where they met (PLAY, PAUSED and so on). They're joined
   smoothly now.
+- **Works with the uncensored ROM hack.** ROM hacks that only change the game's data, like the
+  uncensored speech, are accepted. Pick one with the **ROM** option in the launcher, which also shows
+  which one you're playing (Original or Uncensored) and switches back any time.
 - **Texture pack and mod support.** RT64 texture packs (`.rtz`) and N64Recomp mods (`.nrm`) go in
   through the Mods menu and can be switched on and off while you play.
 
@@ -113,11 +119,6 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Linux build.** It builds and runs the game at full speed, and draws correctly, but I've only
   run it inside WSL on Windows with software graphics. Real Linux hardware, controllers and sound
   are untested. Please report how it goes.
-- **HD Icons texture pack** (optional download on the [Releases](../../releases) page). It gives the
-  HUD, menus and on-screen text sharp hand-drawn versions, using GameBeast92's 4K textures with
-  the original game's colours and shapes kept. Many of its pictures were matched straight from
-  the game files and haven't been seen in-game yet, so a few might not show up or might look
-  slightly off. See [HD Icons](#hd-icons-texture-pack) below.
 
 ### From CBFD-Recompiled
 
@@ -150,11 +151,9 @@ shared under the same license, and the `LICENSE.txt` inside it lists what was ch
 ## Known issues
 
 - **The free camera stays out of fixed-camera spots.** Places where the game uses a fixed camera
-  (some doorways, the Windy barn) keep it. That's on purpose. The free camera can also end up
-  behind crates and other objects, just like the game's own camera.
+  (some doorways, the Windy barn) keep it. That's on purpose.
 - **Controls feel like the original.** The game still runs its logic at 30 fps like on the N64. The
   smooth frame rate makes it look smoother, but Conker handles exactly the way he always did.
-- **Mods made for CBFD-Recompiled** load, but I haven't checked that every one of them works here.
 - **No macOS build yet.**
 
 ## Coming next

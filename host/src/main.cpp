@@ -148,8 +148,13 @@ namespace {
         return std::filesystem::current_path();
     }
 
+    // The US ROM, or a ROM hack of it that only changes the game's data (the uncensored one).
     bool accept_rom(std::span<const uint8_t> rom) {
-        return XXH3_64bits(rom.data(), rom.size()) == conker::us_rom_hash;
+        if (XXH3_64bits(rom.data(), rom.size()) == conker::us_rom_hash) {
+            return true;
+        }
+        return rom.size() >= conker::rom_code_end &&
+            XXH3_64bits(rom.data() + conker::rom_code_start, conker::rom_code_end - conker::rom_code_start) == conker::us_code_hash;
     }
 }
 
@@ -216,7 +221,7 @@ int main(int argc, char** argv) {
     if (!rom_path.empty()) {
         recomp::RomValidationError result = recomp::select_rom(rom_path, game_id);
         if (result != recomp::RomValidationError::Good) {
-            std::fprintf(stderr, "[host] %s isn't the US ROM of Conker's Bad Fur Day\n", rom_path.string().c_str());
+            std::fprintf(stderr, "[host] %s isn't the US ROM of Conker's Bad Fur Day (or a hack of it that keeps its code)\n", rom_path.string().c_str());
             return EXIT_FAILURE;
         }
     } else {

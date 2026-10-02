@@ -122,8 +122,11 @@ void conker::crosshair::update() {
     }
     const auto last = clock::time_point(clock::duration(aimed_at.load()));
     // Single player only: in split screen the middle of the window isn't player 1's view.
+    // Not while a cutscene or a talk plays: the game uses the look mode for some (Conker reading
+    // "What To Do"), though nothing can be thrown then.
     const bool wanted = ui_ready && conker::crosshair::enabled() && ultramodern::is_game_started() &&
-        recompinput::players::is_single_player_mode() && clock::now() - last < still_aiming;
+        recompinput::players::is_single_player_mode() && clock::now() - last < still_aiming &&
+        !conker::qol::cutscene_playing();
     if (!wanted) {
         if (created && recompui::is_context_shown(context)) {
             recompui::hide_context(context);

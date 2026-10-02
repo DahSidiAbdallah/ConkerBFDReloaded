@@ -44,8 +44,21 @@ rm -rf "$A/mixed"
 "$P" "$T/mix_pack.py" "$A/originals" "$A/pack4k" "$A/layout.json" "$A/places/rect_places.txt" "$A/mixed" \
   --restyle 99779e,e70120 --redraw 46c2ab,186ece 2>/dev/null | tail -1
 "$P" "$T/make_new_game.py" "$A/mixed" 2>/dev/null
+# The save files' location pictures (64x22, the bar menu's GAME pictures): the 4K pack's versions
+# land on the wrong pictures (other places, faded copies), so the game's own are kept.
+"$P" - "$A/originals" "$A/mixed" <<'PY'
+import os, sys
+from PIL import Image
+originals, mixed = sys.argv[1], sys.argv[2]
+removed = 0
+for name in os.listdir(mixed):
+    original = os.path.join(originals, name)
+    if name.endswith('.png') and os.path.exists(original) and Image.open(original).size == (64, 22):
+        os.remove(os.path.join(mixed, name)); removed += 1
+print(f'left out {removed} location pictures')
+PY
 "$P" "$T/make_thumb.py" "$A" "$R/icons_work/hd_icons_thumb.png"
-"$P" "$T/make_pack.py" "$A/mixed" "$R/icons_work/conker_hd_icons.rtz" --id conker_hd_icons --name "HD Icons" --version 1.3.0 \
+"$P" "$T/make_pack.py" "$A/mixed" "$R/icons_work/conker_hd_icons.rtz" --id conker_hd_icons --name "HD Icons" --version 1.3.1 \
   --description "Sharper HUD, menu and text pictures, with the original colours and shapes kept. Textures by GameBeast92 (Conker's Bad Fur Day 4K Ultimate Texture Pack, github.com/GameBeast92), modified, under CC BY 4.0. See LICENSE.txt in the pack." \
   --short "Sharper HUD and menus" --author dahmedvall95 --author "GameBeast92 (4K texture artwork)" \
   --thumb "$R/icons_work/hd_icons_thumb.png" --license "$T/HD_ICONS_LICENSE.txt"
