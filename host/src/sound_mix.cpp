@@ -95,7 +95,9 @@ extern "C" int32_t conker_stream_volume(uint8_t* rdram, int32_t volume) {
 void conker::sound::add_volume_options() {
     recomp::config::Config& sound = recompui::config::get_config(recompui::config::sound::id);
     sound.add_percent_number_option(music_volume, "Music Volume",
-        "The volume of the music (and some ambience the game plays with it).", 100.0);
-    sound.add_percent_number_option(effects_volume, "Sound Effects Volume", "The volume of sound effects.", 100.0);
-    sound.add_percent_number_option(speech_volume, "Speech Volume", "The volume of the characters' spoken lines in cutscenes.", 100.0);
+        "The volume of the <recomp-color primary>music</recomp-color> (and some background ambience the game plays with it).", 100.0);
+    sound.add_percent_number_option(effects_volume, "Sound Effects Volume",
+        "The volume of <recomp-color primary>sound effects</recomp-color>, including Conker's grunts and short voice bits.", 100.0);
+    sound.add_percent_number_option(speech_volume, "Speech Volume",
+        "The volume of the characters' <recomp-color primary>spoken lines</recomp-color> in cutscenes, separately from the music.", 100.0);
 }

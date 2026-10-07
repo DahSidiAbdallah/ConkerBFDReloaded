@@ -9,7 +9,8 @@
 // press, RT64 is asked (rt64_conker_native_aspect_scale, patches/rt64_conker.patch) to write
 // the next frames to RDRAM with the whole widened view squeezed into the 320 pixels. When the
 // pause then copies one of them, its tiles are stretched across the window
-// (widescreen.cpp) and the picture has its proportions back. If no pause comes, RT64 goes
+// (widescreen.cpp) and the picture has its proportions back (RT64 squeezes the 2D in it, like the
+// speech bubbles, as much: they'd come out widened otherwise). If no pause comes, RT64 goes
 // back to the normal native picture after a few frames.
 
 #include <algorithm>

@@ -86,13 +86,14 @@ change any of them yourself.
   animation when your cash changes. Show it only when it changes, or all the time.
 - **Hold to skip cutscenes.** Hold L to skip any cutscene, even the first time you see it and the
   ones the original never lets you skip. A ring fills while you hold, so you can't skip by accident.
-- **Free camera.** Turn the camera with the right stick or the mouse, and it stays where you put it.
-  It keeps Conker in view: it comes in front of anything between him and the camera (walls, the
-  barn's big posts), rises or turns aside a little where there's no room, and glides back out when
-  there's space. Tilted down, it settles just above the ground.
+- **Free camera.** Turn the camera with the right stick, or the mouse too (Free Camera on the
+  General tab), and it stays where you put it. It doesn't go through walls, posts or the floor:
+  where there's no room it comes in toward Conker, and it glides back out when there's space.
+  Tilted down, it settles just above the ground.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
-  turn off the motion blur, keep your health and cash on screen, make the tail spin last longer, and pause
-  the game when you alt-tab.
+  walk instead of run with L, catch the edge when you walk off something high, swim up by pushing up
+  underwater, turn off the motion blur, keep your health and cash on screen, make the tail spin last
+  longer, and pause the game when you alt-tab.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
   resolutions you could see thin lines where they met (PLAY, PAUSED and so on). They're joined
   smoothly now.
@@ -158,8 +159,7 @@ shared under the same license, and the `LICENSE.txt` inside it lists what was ch
 
 ## Coming next
 
-Keeping the lives (the tail) on screen too, alongside the health and cash, and I'm looking into a 2D
-minimap.
+I'm looking into a 2D minimap.
 
 ## Building it yourself
 

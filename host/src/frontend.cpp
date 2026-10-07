@@ -419,6 +419,8 @@ namespace {
         }
         if (controller == 0) {
             conker::qol::set_player_buttons(*buttons);
+            conker::qol::apply_walk(*buttons, x, y);
+            conker::qol::apply_swim(y);
             *buttons = conker::qol::apply_toggles(*buttons);
             conker::crosshair::set_buttons(*buttons);
         }

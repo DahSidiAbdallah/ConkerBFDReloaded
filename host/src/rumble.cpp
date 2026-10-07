@@ -89,14 +89,15 @@ void conker::rumble::add_options(recomp::config::Config& config) {
         "How strong the rumble is, on controllers that have it. <b>Zero turns rumble off.</b>",
         25.0);
     config.add_enum_option(options::motor, "Rumble: Motor",
-        "Which of the controller's motors the Rumble Pak's rumble uses. "
-        "<recomp-color primary>Small</recomp-color>: the quick, light one (as before). "
-        "<recomp-color primary>Large</recomp-color>: the slow, heavy one, closer to the Rumble Pak's own motor. "
-        "<recomp-color primary>Both</recomp-color>: both at once.",
+        "Which of the controller's motors the Rumble Pak's rumble uses."
+        "<br /><recomp-color primary>Small</recomp-color>: the quick, light one."
+        "<br /><recomp-color primary>Large</recomp-color>: the slow, heavy one, closer to the Rumble Pak's own motor."
+        "<br /><recomp-color primary>Both</recomp-color>: both at once.",
         motors, Motor::Small);
     config.add_enum_option(options::style, "Rumble: Style",
-        "How the rumble follows the game. <recomp-color primary>Smooth</recomp-color>: it eases in and out (as before). "
-        "<recomp-color primary>On/Off</recomp-color>: it starts and stops exactly when the game turns the Rumble Pak "
+        "How the rumble follows the game."
+        "<br /><recomp-color primary>Smooth</recomp-color>: it eases in and out."
+        "<br /><recomp-color primary>On/Off</recomp-color>: it starts and stops exactly when the game turns the Rumble Pak "
         "on and off, as a real Rumble Pak and controllers with an on/off motor do.",
         styles, Style::Smooth);
 }

@@ -61,7 +61,6 @@ namespace conker {
     bool camera_inverted();
     bool camera_tilt_inverted();
     float camera_turn_speed();
-    bool mouse_turns_camera();
     float camera_field_of_view();
     // free_camera.cpp: whether player 1's game camera was the normal follow camera last frame (not
     // R-Look, aiming, cutscenes or another special camera).
@@ -72,6 +71,7 @@ namespace conker {
     }
     bool skip_intro();
     bool free_camera_enabled();
+    bool free_camera_mouse(); // Free Camera: Right Stick and Mouse
     // free_camera.cpp: the right stick for the Free Camera (x right, y up, past the dead zone).
     void free_camera_stick(float* x, float* y);
     // scene_fixes.cpp: Skip Intro's steps.
@@ -114,6 +114,10 @@ namespace conker {
         void on_vi();         // every VI: Pause When Unfocused holds the game here
         void set_player_buttons(uint16_t buttons); // player 1's own buttons (Skip Any Cutscene's hold)
         uint16_t apply_toggles(uint16_t buttons); // player 1's buttons: Toggle R-Look / Crouch
+        void apply_walk(uint16_t buttons, float* x, float* y); // player 1's stick: Walk Button
+        void apply_swim(float* y); // player 1's stick: Invert Swimming
+        int walk_button(); // 0 off, 1 hold L, 2 toggle L
+        bool invert_swimming();
         // settings.cpp: the options.
         bool saving_icon();
         bool pause_unfocused();
@@ -123,6 +127,7 @@ namespace conker {
         bool reduce_motion();
         bool always_show_hud();
         int cash_counter(); // 0 off, 1 when it changes, 2 always (cash_hud.cpp)
+        bool ledge_grab();  // ledge_grab.cpp
         bool longer_spin();
         bool cutscene_playing(); // the game's cutscene skip check ran in the last quarter second
         void longer_spin_on_vi(uint8_t* rdram);

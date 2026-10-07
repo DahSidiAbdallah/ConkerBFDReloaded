@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <optional>
 #include <string>
 #include <utility>
@@ -25,12 +27,20 @@ namespace {
     using namespace ultramodern::renderer;
 
     std::atomic<bool> skip_intro_enabled{ false };
-    std::atomic<bool> free_camera{ true };
+    // Free Camera (General tab): Off, the right stick, or the right stick and the mouse.
+    enum class FreeCamera : uint32_t { Off, Stick, StickAndMouse };
+    std::atomic<uint32_t> free_camera_mode{ (uint32_t)FreeCamera::StickAndMouse };
+    // Set when the settings files still have the Free Camera as it was before it moved to the General
+    // tab (an on/off switch on the Conker tab, and the mouse's own switch): carried over once loaded.
+    std::optional<FreeCamera> free_camera_carried;
     std::atomic<bool> crosshair_on{ true };
     // qol.cpp's options.
     std::atomic<bool> saving_icon_on{ true }, pause_unfocused_on{ true }, skip_cutscene_on{ false };
     std::atomic<bool> toggle_r_on{ false }, toggle_z_on{ false }, reduce_motion_on{ false }, always_hud_on{ false }, longer_spin_on{ false };
     std::atomic<int> cash_counter_mode{ 0 };
+    std::atomic<bool> ledge_grab_on{ false };
+    std::atomic<bool> invert_swimming_on{ false };
+    std::atomic<int> walk_button_mode{ 0 };
 
     enum class Experience : uint32_t { Classic, Modern, Custom };
 
@@ -69,34 +79,38 @@ namespace {
     void add_extra_graphics_options() {
         recomp::config::Config& graphics = recompui::config::get_graphics_config();
         graphics.add_enum_option(extra::texture_filter, "Texture Filtering",
-            "N64 uses the console's own three-point filtering, the way textures looked on the N64. "
-            "Smooth uses standard bilinear filtering, which blends textures a little more evenly.",
+            "How textures are smoothed."
+            "<br /><recomp-color primary>N64</recomp-color>: the console's own three-point filtering, exactly as textures looked on the N64."
+            "<br /><recomp-color primary>Smooth</recomp-color>: standard filtering, which blends them a little more evenly.",
             { { TextureFilter::N64, "N64", "N64" }, { TextureFilter::Smooth, "Smooth", "Smooth" } },
             TextureFilter::N64);
         // RT64 has a third choice, ScaledOnly (sharpen only the 2D the game scales); tested
         // side by side on the menus and the pause screen it looked the same as Original, so
         // it isn't offered.
         graphics.add_enum_option(extra::upscale_2d, "2D Graphics",
-            "How 2D pictures (text, menus, the HUD) are drawn. Original keeps them at the N64's resolution, "
-            "pixels and all, as on the console. Smooth draws them at full resolution.",
+            "How text, menus and the HUD are drawn."
+            "<br /><recomp-color primary>Original</recomp-color>: at the N64's resolution, pixels and all."
+            "<br /><recomp-color primary>Smooth</recomp-color>: at full resolution, sharp at any size.",
             { { Upscale2D::Original, "Original", "Original" }, { Upscale2D::All, "All", "Smooth" } },
             Upscale2D::Original);
         graphics.add_enum_option(extra::screen_filter, "Screen Filter",
-            "How the picture is enlarged to the window when the resolution is lower than the window's. "
-            "Sharp keeps pixels crisp, Smooth blends them.",
+            "How the picture is stretched to fill the window when the resolution is lower than the window's."
+            "<br /><recomp-color primary>Sharp</recomp-color>: crisp pixels."
+            "<br /><recomp-color primary>Smooth</recomp-color>: softly blended.",
             { { ScreenFilter::Sharp, "Sharp", "Sharp" }, { ScreenFilter::Smooth, "Smooth", "Smooth" } },
             ScreenFilter::Sharp);
         graphics.add_enum_option(extra::shading, "Shading",
-            "How the game's lights (torches, lamps, fires) light walls and characters. Original works the light "
-            "out at the corners of each triangle and blends it between them, as the N64 did: pools of light "
-            "look blotchy and angular. Smooth works it out for every pixel: soft, round pools of light.",
+            "How torches, lamps and fires light the world."
+            "<br /><recomp-color primary>Original</recomp-color>: worked out at the corners of each triangle, as on the N64, so pools of light look "
+            "blotchy and angular."
+            "<br /><recomp-color primary>Smooth</recomp-color>: worked out for every pixel, for soft, round pools of light.",
             { { Shading::Original, "Original", "Original" }, { Shading::Smooth, "Smooth", "Smooth" } },
             Shading::Original);
         graphics.add_enum_option(extra::show_fps, "Show FPS",
-            "Shows the frame rate in the top-right corner while playing, to spot slowdowns. "
-            "<recomp-color primary>FPS</recomp-color> is the frames drawn to the screen each second (with the smooth frame rate, "
-            "more than the game makes): a drop there is the PC falling behind. "
-            "<recomp-color primary>Game</recomp-color> is the frames the game itself makes, up to 30: a drop there with FPS "
+            "Shows the frame rate in the top-right corner while you play, to spot slowdowns."
+            "<br /><recomp-color primary>FPS</recomp-color> is the frames drawn to the screen each second (with the smooth frame rate, "
+            "more than the game makes): a drop there is the PC falling behind."
+            "<br /><recomp-color primary>Game</recomp-color> is the frames the game itself makes, up to 30: a drop there with FPS "
             "steady is the game's own slowdown, as on the N64.",
             { { 0u, "Off", "Off" }, { 1u, "On", "On" } }, 0u);
         graphics.add_option_change_callback(extra::shading,
@@ -145,7 +159,7 @@ namespace {
                 // Only matters below the window's resolution, as in Classic.
                 { Tab::Graphics, extra::screen_filter, e(ScreenFilter::Sharp), std::nullopt },
                 { Tab::Conker, "skip_intro", V{ false }, V{ true } },
-                { Tab::Conker, "free_camera", V{ false }, V{ true } },
+                { Tab::General, "free_camera", e(FreeCamera::Off), e(FreeCamera::StickAndMouse) },
                 { Tab::Conker, "aiming_crosshair", V{ false }, V{ true } },
                 { Tab::Conker, "saving_icon", V{ false }, V{ true } },
                 { Tab::Accessibility, "pause_unfocused", V{ false }, V{ true } },
@@ -231,12 +245,14 @@ namespace {
         recomp::config::Config& conker = recompui::config::create_config_tab("Conker", "conker", false);
         conker.add_enum_option(
             "experience", "Experience",
-            "Classic plays the game as it was on the N64: 4:3, 30 frames per second, the original resolution, "
-            "the full intro and the game's own camera. Modern picks the recommended settings: widescreen, your "
-            "display's frame rate, full resolution, anti-aliasing, smooth textures and shading, straight to the save menu, "
-            "the free camera, the aiming crosshair and mouse control. While Classic or Modern is picked, the settings it "
-            "decides are greyed out; pick Custom to change them yourself. Invert, turning speed, rumble and gyro stay "
-            "as you set them.",
+            "A quick way to set up the whole game."
+            "<br /><br /><recomp-color primary>Classic</recomp-color>: as it was on the N64 (4:3, 30 frames per second, the original resolution, the "
+            "full intro and the game's own camera)."
+            "<br /><br /><recomp-color primary>Modern</recomp-color>: the recommended settings (widescreen, your display's frame rate, full resolution, "
+            "anti-aliasing, smooth textures and lighting, straight to the save menu, the free camera, the aiming "
+            "crosshair and mouse control)."
+            "<br /><br /><recomp-color primary>Custom</recomp-color>: set everything yourself.<br /><br />While Classic or Modern is picked, the settings it "
+            "decides are greyed out. Invert, turning speed, rumble and gyro always stay as you set them.",
             { { Experience::Classic, "Classic", "Classic" }, { Experience::Modern, "Modern", "Modern" },
               { Experience::Custom, "Custom", "Custom" } },
             Experience::Modern);
@@ -254,28 +270,18 @@ namespace {
             });
         conker.add_bool_option(
             "skip_intro", "Skip Intro",
-            "Skips the opening (the legal screens, the Nintendo logo and the chainsaw scene): the game "
-            "starts at the save menu in the bar.",
+            "Starts the game <recomp-color primary>straight at the save menu</recomp-color> in the bar, skipping the legal screens, the Nintendo "
+            "logo and the opening scene.",
             false);
         conker.add_option_change_callback("skip_intro",
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
                 skip_intro_enabled = std::get<bool>(cur);
             });
         conker.add_bool_option(
-            "free_camera", "Free Camera",
-            "The right stick turns the camera freely around Conker and tilts it up and down; it stays where you "
-            "leave it. C-Left or C-Right hands the camera back to the game, and cutscenes, special cameras and "
-            "aiming keep the game's own. With a mouse, set Mouse Sensitivity (General tab) above 0 to do the same "
-            "with the mouse, and the scroll wheel to zoom.",
-            true);
-        conker.add_option_change_callback("free_camera",
-            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
-                free_camera = std::get<bool>(cur);
-            });
-        conker.add_bool_option(
             "aiming_crosshair", "Aiming Crosshair",
-            "Shows a small crosshair in the middle of the screen while Conker aims to throw something (or aims the "
-            "magnum), so you can see where it'll go. The original game has none there. The sniper scope keeps its own.",
+            "Shows a <recomp-color primary>red dot</recomp-color> where a throw will land while Conker aims (knives, throwables, the magnum). It "
+            "stays hidden when you just look around with R, and during cutscenes. The sniper scope keeps its own "
+            "crosshair; the original game has none elsewhere.",
             true);
         conker.add_option_change_callback("aiming_crosshair",
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
@@ -288,13 +294,13 @@ namespace {
                     *target = std::get<bool>(cur);
                 });
         };
-        add_bool("saving_icon", "Autosave Icon",
-            "Shows Conker's head in the bottom-right corner while the game saves (at checkpoints and on the save "
-            "menu), as modern games do. The original game shows none.", true, &saving_icon_on);
         add_bool("skip_any_cutscene", "Skip Any Cutscene",
-            "Hold L to skip any cutscene, even the first time you see it (the original only lets you skip ones you've "
-            "watched before), including the ones it never lets you skip, like the opening. \"Hold to Skip\" shows in "
-            "the corner with a ring that fills while you hold; a quick press doesn't skip.", false, &skip_cutscene_on);
+            "<recomp-color primary>Hold L</recomp-color> to skip any cutscene, even the first time you see it and the ones the original never "
+            "lets you skip, like the opening. \"Hold to Skip\" shows in the corner with a ring that fills while you "
+            "hold, so a quick press never skips by accident.", false, &skip_cutscene_on);
+        add_bool("saving_icon", "Autosave Icon",
+            "Shows Conker's head in the <recomp-color primary>bottom-right corner</recomp-color> while the game saves (at checkpoints and on the "
+            "save menu), so you know your progress is safe. The original game shows none.", true, &saving_icon_on);
     }
 
     // The Accessibility tab: options that make the game easier to see, play and control.
@@ -307,32 +313,63 @@ namespace {
                     *target = std::get<bool>(cur);
                 });
         };
+        // Controls.
         add_bool("toggle_r_look", "Toggle R-Look",
-            "Press R once to look around and again to stop, instead of holding it.", false, &toggle_r_on);
+            "<recomp-color primary>Press R</recomp-color> once to start looking around and again to stop, instead of holding it down.",
+            false, &toggle_r_on);
         add_bool("toggle_crouch", "Toggle Crouch",
-            "Press Z once to crouch and again to stand, instead of holding it.", false, &toggle_z_on);
-        add_bool("reduce_motion", "Reduce Motion Effects",
-            "Turns off the motion blur (the ghostly trails while Conker is drunk at the start of the "
-            "game), which can cause motion sickness.", false, &reduce_motion_on);
+            "<recomp-color primary>Press Z</recomp-color> once to crouch and again to stand up, instead of holding it down.", false, &toggle_z_on);
+        accessibility.add_enum_option("walk_button", "Walk Button",
+            "Makes Conker <recomp-color primary>walk</recomp-color> instead of run, with his own walking animation, for tight spots and narrow "
+            "ledges. You still steer with the stick, and pushing it less goes slower still. L isn't used during play."
+            "<br /><recomp-color primary>Off</recomp-color>: as in the original (a gentle push on the stick also walks)."
+            "<br /><recomp-color primary>Hold L</recomp-color>: walk while you hold L."
+            "<br /><recomp-color primary>Toggle L</recomp-color>: tap L to switch between walking and running.",
+            { { 0u, "Off", "Off" }, { 1u, "HoldL", "Hold L" }, { 2u, "ToggleL", "Toggle L" } }, 0u);
+        accessibility.add_option_change_callback("walk_button",
+            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                walk_button_mode = (int)std::get<uint32_t>(cur);
+            });
+        add_bool("invert_swimming", "Invert Swimming",
+            "Underwater, <recomp-color primary>pushing up swims up</recomp-color> and pushing down swims down (on a controller or the keyboard). "
+            "In the original, swimming underwater steers like a plane: pushing up dives. Swimming on the surface isn't affected.",
+            false, &invert_swimming_on);
+        // Help getting around.
+        add_bool("ledge_grab", "Ledge Grab",
+            "When Conker <recomp-color primary>walks off</recomp-color> anything high (a platform, a table, a box), he catches the edge and hangs on "
+            "instead of falling, as he does on some beams in the original. Jumping off and small steps work as normal."
+            "<br /><br />While hanging:"
+            "<br /><recomp-color primary>A</recomp-color>: climb up."
+            "<br /><recomp-color primary>Push toward the edge</recomp-color>: hop up."
+            "<br /><recomp-color primary>Push away</recomp-color>: let go.",
+            false, &ledge_grab_on);
+        add_bool("longer_tail_spin", "Longer Tail Spin",
+            "Conker's <recomp-color primary>tail spin</recomp-color> (press A again in the air) floats higher and glides down more slowly, so he "
+            "stays up about a third longer. Off matches the original; on lets you reach a little further than the "
+            "levels were made for.",
+            false, &longer_spin_on);
+        // On screen.
         add_bool("always_show_hud", "Always Show Health",
-            "Keeps Conker's health (the chocolate) on screen all the time during play, instead of only for a few "
-            "seconds after it changes.", false, &always_hud_on);
+            "Keeps Conker's <recomp-color primary>health</recomp-color> (the chocolate) on screen all the time, instead of only for a few seconds "
+            "after it changes.", false, &always_hud_on);
         accessibility.add_enum_option("cash_counter", "Show Cash",
-            "Shows how much cash Conker has during play, drawn just as on the pause screen (the wad of bills and the "
-            "gold numbers), counting up or down when it changes. The original game only shows it on the pause screen. "
-            "When It Changes shows it for a few seconds after you get or spend cash; Always keeps it on screen.",
+            "Shows your <recomp-color primary>cash</recomp-color> in the top-right corner while you play, just as on the pause screen, counting up "
+            "or down when it changes. The original only shows it on the pause screen."
+            "<br /><recomp-color primary>Off</recomp-color>: as in the original."
+            "<br /><recomp-color primary>When It Changes</recomp-color>: for a few seconds after you get or spend some."
+            "<br /><recomp-color primary>Always</recomp-color>: all the time.",
             { { 0u, "Off", "Off" }, { 1u, "WhenItChanges", "When It Changes" }, { 2u, "Always", "Always" } }, 0u);
         accessibility.add_option_change_callback("cash_counter",
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
                 cash_counter_mode = (int)std::get<uint32_t>(cur);
             });
-        add_bool("longer_tail_spin", "Longer Tail Spin",
-            "When Conker spins his tail after a jump (press A again in the air), he floats up for longer and glides "
-            "down more slowly. Off matches the original game. It lets you glide further than the levels were made for.",
-            false, &longer_spin_on);
+        // Comfort.
+        add_bool("reduce_motion", "Reduce Motion Effects",
+            "Turns off the <recomp-color primary>motion blur</recomp-color> (the ghostly trails while Conker is drunk at the start of the game), "
+            "which can cause motion sickness.", false, &reduce_motion_on);
         add_bool("pause_unfocused", "Pause When Unfocused",
-            "Pauses the game while its window isn't the one you're using (after alt-tab, or clicking another window), "
-            "and carries on when you come back.", true, &pause_unfocused_on);
+            "<recomp-color primary>Pauses</recomp-color> the game while you're in another window (after alt-tab or a click elsewhere) and carries "
+            "on when you come back.", true, &pause_unfocused_on);
     }
 
     void describe_controls() {
@@ -358,6 +395,49 @@ namespace {
     }
 }
 
+namespace {
+    // Free Camera, on the General tab with the camera's other settings. It used to be an on/off switch
+    // on the Conker tab for the right stick, with the mouse's own switch (Mouse: Turn the Camera, from
+    // CBFD-Recompiled) on the General tab: two switches for one camera. Now one, and whatever the two
+    // were set to is carried over (read from the files before they're loaded and saved without them).
+    bool file_has(const std::filesystem::path& file, const std::string& text) {
+        std::ifstream in(file);
+        std::stringstream contents;
+        contents << in.rdbuf();
+        return contents.str().find(text) != std::string::npos;
+    }
+
+    void add_free_camera_option(recomp::config::Config& general) {
+        const std::filesystem::path folder = recompui::file::get_app_folder_path();
+        const std::filesystem::path general_file = folder / "general.json";
+        const std::filesystem::path conker_file = folder / "conker.json";
+        if (std::filesystem::exists(general_file) && !file_has(general_file, "\"free_camera\"")) {
+            if (file_has(conker_file, "\"free_camera\": false")) {
+                free_camera_carried = FreeCamera::Off;
+            } else if (file_has(general_file, "\"mouse_turns_camera\": \"Off\"")) {
+                free_camera_carried = FreeCamera::Stick;
+            } else {
+                free_camera_carried = FreeCamera::StickAndMouse;
+            }
+        }
+        general.add_enum_option("free_camera", "Free Camera",
+            "Turn the camera freely around Conker. It stays where you leave it and keeps Conker in view, coming "
+            "in toward him instead of going through walls, posts and the floor; the <recomp-color primary>scroll wheel</recomp-color> zooms."
+            "<br /><br /><recomp-color primary>Off</recomp-color>: the game's own camera."
+            "<br /><recomp-color primary>Right Stick</recomp-color>: the right stick turns it; the mouse only aims."
+            "<br /><recomp-color primary>Right Stick and Mouse</recomp-color>: the mouse turns it too (with Mouse: Sensitivity above zero)."
+            "<br /><br /><recomp-color primary>C-Left</recomp-color> or <recomp-color primary>C-Right</recomp-color> hands the camera back to the game. "
+            "Cutscenes, aiming and special cameras always use the game's own.",
+            { { FreeCamera::Off, "Off", "Off" }, { FreeCamera::Stick, "Stick", "Right Stick" },
+              { FreeCamera::StickAndMouse, "StickAndMouse", "Right Stick and Mouse" } },
+            FreeCamera::StickAndMouse);
+        general.add_option_change_callback("free_camera",
+            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                free_camera_mode = std::get<uint32_t>(cur);
+            });
+    }
+}
+
 void conker::init_settings() {
     std::filesystem::path app_folder = recompui::file::get_app_folder_path();
     if (!app_folder.empty()) {
@@ -374,6 +454,7 @@ void conker::init_settings() {
     general.has_mouse_sensitivity = false;
     recomp::config::Config& general_config = recompui::config::create_general_tab(general);
     conker::rumble::add_options(general_config);
+    add_free_camera_option(general_config);
     conker::look_aim::add_options(general_config);
     recompui::config::create_graphics_tab();
     add_extra_graphics_options();
@@ -383,11 +464,16 @@ void conker::init_settings() {
     conker::sound::add_volume_options();
     recompui::config::create_mods_tab();
     recompui::config::finalize();
+    if (free_camera_carried.has_value()) {
+        recomp::config::Config& general = recompui::config::get_general_config();
+        general.update_option_value("free_camera", (uint32_t)*free_camera_carried);
+        general.save_config();
+    }
     enforce_experience();
 }
 
 // The General tab's Camera: Invert Turning and Camera: Turning Speed (look_aim.cpp, from
-// CBFD-Recompiled), which the Free Camera's right stick follows too.
+// CBFD-Recompiled), which the Free Camera follows too (the turning speed: its right stick).
 bool conker::camera_inverted() {
     auto value = recompui::config::get_general_config().get_option_value("camera_invert_turning");
     const uint32_t* v = std::get_if<uint32_t>(&value);
@@ -400,14 +486,7 @@ bool conker::camera_tilt_inverted() {
     return v != nullptr && (*v == 2 || *v == 3); // Invert Y, Invert Both
 }
 
-// The General tab's Mouse: Turn the Camera and Camera: Field of View (look_aim.cpp, from
-// CBFD-Recompiled V0.1.5).
-bool conker::mouse_turns_camera() {
-    auto value = recompui::config::get_general_config().get_option_value("mouse_turns_camera");
-    const uint32_t* v = std::get_if<uint32_t>(&value);
-    return v == nullptr || *v == 0; // On
-}
-
+// The General tab's Camera: Field of View (look_aim.cpp, from CBFD-Recompiled V0.1.5).
 float conker::camera_field_of_view() {
     auto value = recompui::config::get_general_config().get_option_value("camera_field_of_view_degrees");
     const double* v = std::get_if<double>(&value);
@@ -421,7 +500,11 @@ float conker::camera_turn_speed() {
 }
 
 bool conker::free_camera_enabled() {
-    return free_camera;
+    return free_camera_mode != (uint32_t)FreeCamera::Off;
+}
+
+bool conker::free_camera_mouse() {
+    return free_camera_mode == (uint32_t)FreeCamera::StickAndMouse;
 }
 
 bool conker::crosshair::enabled() {
@@ -446,4 +529,7 @@ bool conker::qol::toggle_crouch() { return toggle_z_on; }
 bool conker::qol::reduce_motion() { return reduce_motion_on; }
 bool conker::qol::always_show_hud() { return always_hud_on; }
 int conker::qol::cash_counter() { return cash_counter_mode; }
+bool conker::qol::ledge_grab() { return ledge_grab_on; }
+bool conker::qol::invert_swimming() { return invert_swimming_on; }
+int conker::qol::walk_button() { return walk_button_mode; }
 bool conker::qol::longer_spin() { return longer_spin_on; }

@@ -756,3 +756,16 @@ text = "{ extern void conker_cash_hud(uint8_t*, recomp_context*); conker_cash_hu
 func = "func_15017640"
 before_vram = 0x15017640
 text = "{ extern void conker_cash_hud_reset(uint8_t*, recomp_context*); conker_cash_hud_reset(rdram, ctx); }"
+
+# Ledge Grab (host/src/ledge_grab.cpp): the falling grab search's triangle mask, cleared when the
+# option is on and Conker has just walked off a real drop, so every ground edge can be grabbed.
+[[patches.hook]]
+func = "func_150AC3E4"
+before_vram = 0x150AC474
+text = "{ extern void conker_ledge_grab_mask(uint8_t*, recomp_context*); conker_ledge_grab_mask(rdram, ctx); }"
+
+# (testing) Ledge Grab: what the falling grab search found, where func_1504CB98 reads it.
+[[patches.hook]]
+func = "func_1504CB98"
+before_vram = 0x15050ACC
+text = "{ extern void conker_ledge_grab_found(uint8_t*, recomp_context*); conker_ledge_grab_found(rdram, ctx); }"

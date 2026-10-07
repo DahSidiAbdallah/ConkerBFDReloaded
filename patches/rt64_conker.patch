@@ -582,7 +582,7 @@ index 313f93a..dfd13ce 100644
          void setVertexSegmentV1(bool isEnabled, uint32_t vertexElement, uint32_t vertexAddress, uint32_t baseSegmentAddress);
          template<uint32_t floatCount, uint32_t vertexSize>
 diff --git a/src/hle/rt64_state.cpp b/src/hle/rt64_state.cpp
-index 34210a0..1d3fc88 100644
+index 34210a0..ec926c1 100644
 --- a/src/hle/rt64_state.cpp
 +++ b/src/hle/rt64_state.cpp
 @@ -3,11 +3,15 @@
@@ -709,7 +709,15 @@ index 34210a0..1d3fc88 100644
          // Upload the transforms directly.
          ext.transformsUploader->submit(ext.framebufferGraphicsWorker, {
              { workload.drawData.viewProjTransforms.data(), workload.drawRanges.viewProjTransforms, sizeof(interop::float4x4), RenderBufferFlag::STORAGE, { }, &workload.drawBuffers.viewProjTransformsBuffer},
-@@ -1370,6 +1447,7 @@ namespace RT64 {
+@@ -1349,6 +1426,7 @@ namespace RT64 {
+                         drawParams.postBlendNoise = ext.emulatorConfig->dither.postBlendNoise;
+                         drawParams.postBlendNoiseNegative = ext.emulatorConfig->dither.postBlendNoiseNegative;
+                         drawParams.maxGameCall = UINT_MAX;
++                        drawParams.conkerNativeSqueeze = (nativeWideScale > 1.0f) ? nativeWideScale : 1.0f;
+                         framebufferRenderer->addFramebuffer(drawParams);
+                     }
+ 
+@@ -1370,6 +1448,7 @@ namespace RT64 {
                      gpuTileRange.second = rdpTileCursor;
                      framebufferRenderer->createGPUTiles(&workload.drawData.callTiles[gpuTileCursor], rdpTileCursor - gpuTileCursor,
                          &workload.drawData.gpuTiles[gpuTileCursor], &framebufferManager, ext.textureCache, workload.submissionFrame);
@@ -717,7 +725,7 @@ index 34210a0..1d3fc88 100644
  
                      // Upload the GPU tiles.
                      ext.tilesUploader->submit(ext.framebufferGraphicsWorker, {
-@@ -1608,6 +1686,10 @@ namespace RT64 {
+@@ -1608,6 +1687,10 @@ namespace RT64 {
  
              // Render any remaining batches of framebuffers.
              renderAndSynchronize(workload.fbPairCount);
@@ -882,7 +890,7 @@ index 69a82ac..c98c33f 100644
              gLinearWrapMirrorSampler = builder.addImmutableSampler(8, samplerLibrary.linear.wrapMirror.get());
              gLinearWrapClampSampler = builder.addImmutableSampler(9, samplerLibrary.linear.wrapClamp.get());
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 2046b61..30c90c5 100644
+index 2046b61..400774f 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
 @@ -229,11 +229,14 @@ namespace RT64 {
@@ -927,8 +935,30 @@ index 2046b61..30c90c5 100644
          testZIndexBuffer = outputBuffers.testZIndexBuffer.buffer.get();
          testZIndexBufferView = RenderIndexBufferView(testZIndexBuffer, uint32_t(outputBuffers.testZIndexBuffer.allocatedSize), RenderFormat::R32_UINT);
  
+@@ -1435,7 +1450,11 @@ namespace RT64 {
+         const float SimilarityPercentage = 0.1f; // TODO: Make more strict once VI ratios are in.
+         const float scissorRatio = static_cast<float>(fbPair.scissorRect.width(false, true)) / static_cast<float>(fbPair.scissorRect.height(false, true));
+         const bool adjustRatio = (abs((scissorRatio / p.aspectRatioSource) - 1.0f) < SimilarityPercentage);
+-        const float aspectRatioScale = adjustRatio ? (p.aspectRatioTarget / p.aspectRatioSource) : 1.0f;
++        // Conker: in the native picture with the widened view squeezed into it (for the pause background,
++        // State::fullSync), the 2D and the views narrower than the frame are squeezed as much about the
++        // middle, as the high resolution picture keeps them at 4:3 within the widened view.
++        const bool conkerNativeSqueeze = (p.conkerNativeSqueeze > 1.0f) && (abs((scissorRatio / (4.0f / 3.0f)) - 1.0f) < SimilarityPercentage);
++        const float aspectRatioScale = conkerNativeSqueeze ? p.conkerNativeSqueeze : (adjustRatio ? (p.aspectRatioTarget / p.aspectRatioSource) : 1.0f);
+ 
+         // TEMP-DEBUG (Conker): FbLog, see common/rt64_fblog.h.
+         const bool fbLog = FbLog::frameLogged(p.curWorkload->submissionFrame);
+@@ -1514,7 +1533,7 @@ namespace RT64 {
+                     projInvRatioScale = 1.0f;
+                 }
+                 else {
+-                    triangles.screenScale.x = originalWidth / wideWidth;
++                    triangles.screenScale.x = conkerNativeSqueeze ? (1.0f / aspectRatioScale) : (originalWidth / wideWidth);
+ 
+                     if (viewportOrigin < G_EX_ORIGIN_NONE) {
+                         const float centerOffset = ((middleViewport * viewportOrigin) / G_EX_ORIGIN_CENTER) * extOriginPercentage + middleViewport * (1.0f - extOriginPercentage);
 diff --git a/src/render/rt64_framebuffer_renderer.h b/src/render/rt64_framebuffer_renderer.h
-index 3add9c3..eb1bc39 100644
+index 3add9c3..956c836 100644
 --- a/src/render/rt64_framebuffer_renderer.h
 +++ b/src/render/rt64_framebuffer_renderer.h
 @@ -73,9 +73,10 @@ namespace RT64 {
@@ -945,6 +975,14 @@ index 3add9c3..eb1bc39 100644
          RenderIndexBufferView indexBufferView;
          RenderBuffer *testZIndexBuffer = nullptr;
          RenderIndexBufferView testZIndexBufferView;
+@@ -147,6 +148,7 @@ namespace RT64 {
+             bool postBlendNoise;
+             bool postBlendNoiseNegative;
+             uint32_t maxGameCall;
++            float conkerNativeSqueeze = 1.0f; // Conker: see State::fullSync (the native picture for the pause background)
+         };
+ 
+         FramebufferRenderer(RenderWorker *worker, bool rtSupport, UserConfiguration::GraphicsAPI graphicsAPI, const ShaderLibrary *shaderLibrary);
 diff --git a/src/render/rt64_raster_shader.cpp b/src/render/rt64_raster_shader.cpp
 index 721a01e..92ba9b6 100644
 --- a/src/render/rt64_raster_shader.cpp

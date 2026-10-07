@@ -57,8 +57,15 @@ for name in os.listdir(mixed):
         os.remove(os.path.join(mixed, name)); removed += 1
 print(f'left out {removed} location pictures')
 PY
+# Pieces whose 4K version is from a differently coloured picture: the opening's "Starring" title,
+# where the strips holding STARRING and the top of the CONKER letters came out gold and orange
+# over the original's purple. The game's own are kept.
+for h in da5087ca2823f435 c2e43ec56e5f408a a8cf89deb84cfd87 a47972f843956c5a 920363c9f0363a34 \
+         81f13ed17c30793f 7c3b76c59317639e 6e03c1508b1bd712 160a109c5ee9da9b; do
+  rm -f "$A/mixed/$h.png"
+done
 "$P" "$T/make_thumb.py" "$A" "$R/icons_work/hd_icons_thumb.png"
-"$P" "$T/make_pack.py" "$A/mixed" "$R/icons_work/conker_hd_icons.rtz" --id conker_hd_icons --name "HD Icons" --version 1.3.1 \
+"$P" "$T/make_pack.py" "$A/mixed" "$R/icons_work/conker_hd_icons.rtz" --id conker_hd_icons --name "HD Icons" --version 1.3.2 \
   --description "Sharper HUD, menu and text pictures, with the original colours and shapes kept. Textures by GameBeast92 (Conker's Bad Fur Day 4K Ultimate Texture Pack, github.com/GameBeast92), modified, under CC BY 4.0. See LICENSE.txt in the pack." \
   --short "Sharper HUD and menus" --author dahmedvall95 --author "GameBeast92 (4K texture artwork)" \
   --thumb "$R/icons_work/hd_icons_thumb.png" --license "$T/HD_ICONS_LICENSE.txt"

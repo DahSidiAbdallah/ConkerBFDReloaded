@@ -1,5 +1,6 @@
 // From CBFD-Recompiled (Copyright (c) 2026 Sean Ciaschi, MIT License; see
-// recomp/THIRD_PARTY_LICENSE), used unchanged except for this note.
+// recomp/THIRD_PARTY_LICENSE), used unchanged except for this note and its Mouse: Turn the Camera
+// switch, now part of our Free Camera option (settings.cpp).
 // Gyro and mouse aiming in the look mode (hold R, look around with the stick), and a choice of
 // smooth or direct response for each of the stick, the mouse and gyro.
 //
@@ -108,10 +109,8 @@ namespace {
         const std::string camera_turn_invert = "camera_invert_turning";
         const std::string camera_turn_speed = "camera_turn_speed";
         // From CBFD-Recompiled V0.1.5 (same ids, so their settings carry over):
-        const std::string mouse_camera = "mouse_turns_camera";
         const std::string camera_fov = "camera_field_of_view_degrees";
     }
-    enum class Toggle : uint32_t { On, Off };
 
     enum class Response : uint32_t { Smooth, Direct };
     enum class Invert : uint32_t { None, X, Y, Both };
@@ -154,18 +153,14 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
         {Invert::Y, "InvertY", "Invert Y"},
         {Invert::Both, "InvertBoth", "Invert Both"},
     };
-    static EnumOptions toggle = {
-        {Toggle::On, "On", "On"},
-        {Toggle::Off, "Off", "Off"},
-    };
 
     // Grouped by what they're about, each group's names starting alike: the camera, then aiming with
     // the stick, the mouse and gyro. The sensitivities are RecompFrontend's options (same ids, so
     // saved values carry over), added here instead of by its General tab to sit with their group.
     config.add_enum_option(options::camera_turn_invert, "Camera: Invert Turning",
-        "Inverts the camera's left and right turning in single player, with the right stick or C-Left and C-Right. "
+        "Inverts the camera's left and right turning in single player, with the right stick, the mouse (Free Camera) or C-Left and C-Right. "
         "<recomp-color primary>None</recomp-color> matches the original game. Strafing in multiplayer isn't affected. "
-        "Y inverts the Free Camera's tilting up and down with the right stick.",
+        "Y inverts the Free Camera's tilting up and down.",
         turn_invert, Invert::None);
     config.add_number_option(options::camera_turn_speed, "Camera: Turning Speed",
         "Sets how fast the camera turns left and right in single player, with the right stick or C-Left and C-Right. "
@@ -177,11 +172,6 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
         "around Conker, less brings the view in closer; the camera stays as far away. Only the normal camera: R-Look, "
         "aiming (so the scope's zoom), cutscenes and other special cameras stay as the game has them.",
         35.0, 80.0, 1.0, 0, false, 50.0);
-    config.add_enum_option(options::mouse_camera, "Mouse: Turn the Camera",
-        "Whether the mouse turns the Free Camera around Conker, outside R-Look and aiming. Needs Mouse: Sensitivity above zero. "
-        "<recomp-color primary>Off</recomp-color> leaves that camera to the stick and C-buttons; the mouse still aims in "
-        "R-Look and the second aiming mode (e.g. the sniper scope).",
-        toggle, Toggle::On);
 
     config.add_enum_option(options::stick_response, "Stick: Aiming Response",
         "How the view follows the stick in R-Look (hold R and look around)." + about +

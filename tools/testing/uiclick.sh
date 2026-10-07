@@ -11,12 +11,12 @@ W=/mnt/c/ConkerRecompWin
 CFG=$(ls -d /mnt/c/Users/*/AppData/Local/ConkerBFDReloaded | head -1)
 out=$W/snaps/ui/$name; rm -rf "$out"; mkdir -p "$out"
 B=$(mktemp -d)
-for f in graphics sound conker mods general controls; do cp "$CFG/$f.json" "$B/" 2>/dev/null; done
+for f in graphics sound conker mods general controls accessibility; do cp "$CFG/$f.json" "$B/" 2>/dev/null; done
 cp "$CFG/saves/conker.n64.us.1.0.bin" "$B/save.bin"
 restore() {
   mkdir -p "$out/config_after"; cp "$CFG"/*.json "$out/config_after/" 2>/dev/null
   taskkill.exe /F /IM ConkerBFDReloaded.exe >/dev/null 2>&1; sleep 1
-  for f in graphics sound conker mods general controls; do [ -f "$B/$f.json" ] && cp "$B/$f.json" "$CFG/"; done
+  for f in graphics sound conker mods general controls accessibility; do [ -f "$B/$f.json" ] && cp "$B/$f.json" "$CFG/"; done
   cp "$B/save.bin" "$CFG/saves/conker.n64.us.1.0.bin"; rm -rf "$B"
 }
 trap restore EXIT

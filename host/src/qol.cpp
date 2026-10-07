@@ -296,6 +296,84 @@ uint16_t conker::qol::apply_toggles(uint16_t buttons) {
     return buttons;
 }
 
+// Walk Button (Accessibility): while L is held (or after a press, with Toggle), the stick is turned
+// down to a gentle push, so the game itself plays Conker's walk (animation 0x01, about a fifth of
+// his run's speed; from about half a push the game runs). Steering is the stick's; pushing less goes
+// slower still. L does nothing in play (it's only Skip Any Cutscene's hold, in cutscenes); Toggle
+// L toggles on a short tap, so holding L to skip never does.
+namespace {
+    constexpr float walk_stick = 0.3f;
+    constexpr double walk_tap_seconds = 0.3; // Toggle L: only a tap this short toggles, on release
+    bool walk_toggled = false;
+    bool walk_l_was_held = false;
+    int64_t walk_l_pressed = 0;     // when L went down
+    bool walk_l_in_cutscene = false; // a cutscene played while L was down (Skip Any Cutscene's hold)
+    // Only on foot: standing on the ground (flags + 0x100 top byte 0x01) in one of his on-foot
+    // animations. Swimming (0x27, also "on the ground") and the air (jumps, the tail spin) keep the
+    // whole stick. Set each VI from his object (on_vi_memory), read on the input thread.
+    std::atomic<bool> on_foot{ false };
+    // Invert Swimming: swimming underwater (animation 0xD1 floating, 0xCE swimming; on the surface
+    // he has others, 0x6C, 0x27), where the stick steers like a plane (up dives). Set with on_foot.
+    std::atomic<bool> underwater{ false };
+    bool on_foot_animation(uint16_t animation) {
+        switch (animation) {
+            case 0x0F: case 0x49: // standing
+            case 0x01: case 0x02: // walking, running
+            case 0x21: case 0x36: // turning, landing
+            case 0x7A:            // pressed against a wall
+            case 0x64: case 0x65: case 0x66: // on a beam: walking, balancing
+                return true;
+            default:
+                return false;
+        }
+    }
+}
+
+static void update_on_foot(uint8_t* rdram) {
+    constexpr int32_t player = (int32_t)0x800CC2D0;
+    const uint8_t flags = (uint8_t)((uint32_t)MEM_W(0, (gpr)(player + 0x100)) >> 24);
+    const uint16_t animation = (uint16_t)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16);
+    on_foot = flags == 0x01 && on_foot_animation(animation);
+    underwater = animation == 0xD1 || animation == 0xCE;
+}
+
+void conker::qol::apply_swim(float* y) {
+    if (conker::qol::invert_swimming() && underwater.load()) {
+        *y = -*y;
+    }
+}
+
+void conker::qol::apply_walk(uint16_t buttons, float* x, float* y) {
+    const int mode = conker::qol::walk_button(); // 0 off, 1 hold L, 2 toggle L
+    const bool l_held = (buttons & button_l) != 0;
+    // A tap toggles when L is let go; a hold never does (holding L to skip a cutscene, even one
+    // that starts or ends during the hold).
+    if (l_held && !walk_l_was_held) {
+        walk_l_pressed = ticks();
+        walk_l_in_cutscene = false;
+    }
+    if (l_held && conker::qol::cutscene_playing()) {
+        walk_l_in_cutscene = true;
+    }
+    if (mode == 2 && !l_held && walk_l_was_held && !walk_l_in_cutscene &&
+        !conker::qol::cutscene_playing() && seconds_since(walk_l_pressed) < walk_tap_seconds) {
+        walk_toggled = !walk_toggled;
+    }
+    walk_l_was_held = l_held;
+    if (mode != 2) {
+        walk_toggled = false;
+    }
+    const bool walking = (mode == 1) ? l_held : walk_toggled;
+    if (walking && on_foot.load()) {
+        // Pushed diagonally, a controller reports up to about 1.4 (both axes at their ends), which
+        // turned down was still enough for the game to run: the push is capped at a full one first.
+        const float push = std::sqrt(*x * *x + *y * *y);
+        const float scale = walk_stick / std::max(1.0f, push);
+        *x *= scale;
+        *y *= scale;
+    }
+}
+
 // Skip Any Cutscene: where func_1501E05C returns ($v0: skip the playing cutscene now). It runs each
 // frame while a cutscene plays. Holding L for hold_seconds skips; a skip the game decided by itself
 // (not from a button: the bar's walk-in after Skip Intro) is kept; a press alone does nothing.
@@ -347,6 +425,7 @@ void conker::qol::on_vi_memory(uint8_t* rdram) {
     if (rdram == nullptr) {
         return;
     }
+    update_on_foot(rdram);
     if (capture_requests.load() > 0) {
         capture_requests--;
         static const bool enabled = std::filesystem::exists(recomp::get_config_path() / "capture_enabled");
