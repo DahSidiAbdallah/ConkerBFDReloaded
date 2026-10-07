@@ -91,7 +91,8 @@ change any of them yourself.
   where there's no room it comes in toward Conker, and it glides back out when there's space.
   Tilted down, it settles just above the ground.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
-  walk instead of run with L, catch the edge when you walk off something high, swim up by pushing up
+  walk instead of run with L, catch the edge when you walk off something high or come up short on a
+  jump, swim up by pushing up
   underwater, turn off the motion blur, keep your health and cash on screen, make the tail spin last
   longer, and pause the game when you alt-tab.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
@@ -120,6 +121,8 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Linux build.** It builds and runs the game at full speed, and draws correctly, but I've only
   run it inside WSL on Windows with software graphics. Real Linux hardware, controllers and sound
   are untested. Please report how it goes.
+- **Rumble, gyro aiming and multiplayer.** These come from CBFD-Recompiled (see below) and are
+  included, but I haven't tested them myself yet.
 
 ### From CBFD-Recompiled
 
@@ -156,10 +159,20 @@ shared under the same license, and the `LICENSE.txt` inside it lists what was ch
 - **Controls feel like the original.** The game still runs its logic at 30 fps like on the N64. The
   smooth frame rate makes it look smoother, but Conker handles exactly the way he always did.
 - **No macOS build yet.**
+- **Bat's Tower, after the third cog.** When the big cog thanks you for bringing his friends back,
+  Conker's lips don't move and the cog's line can be silent (seen with the uncensored ROM). Not
+  looked into yet.
+- **A few lines are still bleeped with the uncensored ROM.** The bleeps are in the uncensored ROM
+  hack itself, not added by this project.
+- **Ledge Grab and corners.** Conker catches straight edges, not the very tip of a corner, the same
+  as the game's own ledge grabs. Step off along an edge rather than over a corner.
+- **The free camera and low obstacles.** The camera keeps the top of Conker's head in view, so a low
+  post or fence between you and him can still hide his body.
 
 ## Coming next
 
-I'm looking into a 2D minimap.
+Ideas and requests (a 2D minimap, swimming tweaks, a French translation and more) are on the
+[Discussions](../../discussions) board. Upvote the ones you want or add your own.
 
 ## Building it yourself
 

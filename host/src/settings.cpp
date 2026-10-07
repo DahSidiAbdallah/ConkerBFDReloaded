@@ -337,7 +337,8 @@ namespace {
         // Help getting around.
         add_bool("ledge_grab", "Ledge Grab",
             "When Conker <recomp-color primary>walks off</recomp-color> anything high (a platform, a table, a box), he catches the edge and hangs on "
-            "instead of falling, as he does on some beams in the original. Jumping off and small steps work as normal."
+            "instead of falling, as he does on some beams in the original. Coming down from a <recomp-color primary>jump</recomp-color> just short of a "
+            "ledge, he catches it too. Small steps and jumping away from an edge work as normal."
             "<br /><br />While hanging:"
             "<br /><recomp-color primary>A</recomp-color>: climb up."
             "<br /><recomp-color primary>Push toward the edge</recomp-color>: hop up."
