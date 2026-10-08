@@ -202,7 +202,7 @@ posters and newspapers inside the levels are still in English for now.
 
 ## Coming next
 
-Ideas and requests (a 2D minimap, keyboard and mouse button prompts and more) are on the
+Ideas and requests (keyboard and mouse button prompts, snappier controls and more) are on the
 [Discussions](../../discussions) board. Upvote the ones you want or add your own.
 
 ## Building it yourself
