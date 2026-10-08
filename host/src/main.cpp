@@ -148,13 +148,35 @@ namespace {
         return std::filesystem::current_path();
     }
 
-    // The US ROM, or a ROM hack of it that only changes the game's data (the uncensored one).
+    // The US ROM, or a ROM hack of it that only changes the game's data (the uncensored speech, the
+    // French translation).
     bool accept_rom(std::span<const uint8_t> rom) {
         if (XXH3_64bits(rom.data(), rom.size()) == conker::us_rom_hash) {
             return true;
         }
-        return rom.size() >= conker::rom_code_end &&
-            XXH3_64bits(rom.data() + conker::rom_code_start, conker::rom_code_end - conker::rom_code_start) == conker::us_code_hash;
+        if (rom.size() < conker::rom_code_end) {
+            return false;
+        }
+        if (XXH3_64bits(rom.data() + conker::rom_code_start, conker::rom_code_end - conker::rom_code_start) == conker::us_code_hash) {
+            return true;
+        }
+        // The code around .game's compressed data unchanged, and that data a known one.
+        XXH3_state_t* state = XXH3_createState();
+        XXH3_64bits_reset(state);
+        XXH3_64bits_update(state, rom.data() + conker::rom_code_start, conker::rom_game_data_start - conker::rom_code_start);
+        XXH3_64bits_update(state, rom.data() + conker::rom_game_data_end, conker::rom_code_end - conker::rom_game_data_end);
+        const uint64_t around = XXH3_64bits_digest(state);
+        XXH3_freeState(state);
+        if (around != conker::us_code_around_game_data_hash) {
+            return false;
+        }
+        const uint64_t data = XXH3_64bits(rom.data() + conker::rom_game_data_start, conker::rom_game_data_end - conker::rom_game_data_start);
+        for (uint64_t known : conker::known_game_data_hashes) {
+            if (data == known) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 

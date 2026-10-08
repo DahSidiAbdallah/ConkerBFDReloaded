@@ -1,0 +1,13 @@
+HD Icons (French) for Conker's Bad Fur Day: Reloaded
+====================================================
+
+The HD Icons pack with the menus, titles and logos of the French translation, for
+playing the game translated into French (see the README: you patch your own ROM).
+
+French translation by Corrigo (text) and Djipi (graphics), from emulation64.fr.
+The French graphics are Djipi's, used with his permission (and Corrigo's).
+
+The other pictures are the HD Icons pack (by dahmedvall95), below.
+
+-----------------------------------------------------------------------------------
+

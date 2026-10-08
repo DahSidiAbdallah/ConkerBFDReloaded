@@ -85,6 +85,32 @@ void conker::testing::on_vi(uint8_t* rdram) {
         MEM_B(0, (gpr)(int32_t)poke_addr) = (int8_t)(MEM_B(0, (gpr)(int32_t)poke_addr) + poke_delta);
         std::printf("[testing] poke %08X += %d\n", poke_addr, poke_delta);
     }
+    // Testing aid: CONKER_TEST_TEXT=seconds:findhex:replacehex: from then on, once a
+    // second until found, look for that text in memory and replace it (same length).
+    static double text_at = -1.0; static std::string text_find, text_repl; static bool text_done = false;
+    static const bool text_parsed = [] {
+        if (const char* p = std::getenv("CONKER_TEST_TEXT")) {
+            char f[256] = {}, r[256] = {};
+            if (std::sscanf(p, "%lf:%255[0-9a-fA-F]:%255[0-9a-fA-F]", &text_at, f, r) == 3) {
+                auto unhex = [](const char* h) { std::string o; for (size_t i = 0; h[i] && h[i + 1]; i += 2) { unsigned v; std::sscanf(h + i, "%2x", &v); o.push_back((char)v); } return o; };
+                text_find = unhex(f); text_repl = unhex(r);
+            }
+        }
+        return true;
+    }();
+    (void)text_parsed;
+    if (text_at > 0 && !text_done && rdram != nullptr && now >= (uint32_t)(text_at * 60.0) && now % 60 == 0 && !text_find.empty()) {
+        const size_t n = text_find.size();
+        for (uint32_t a = 0x80000000; a < 0x80800000 - n; a++) {
+            bool match = true;
+            for (size_t i = 0; i < n && match; i++) match = (uint8_t)MEM_B(0, (gpr)(int32_t)(a + i)) == (uint8_t)text_find[i];
+            if (match) {
+                for (size_t i = 0; i < text_repl.size(); i++) MEM_B(0, (gpr)(int32_t)(a + i)) = (int8_t)text_repl[i];
+                std::printf("[testing] text replaced at %08X\n", a);
+                text_done = true;
+            }
+        }
+    }
     // CONKER_LOG_WINDOW=room:from:to (hex room, room timer): turn on RT64's lighting record
     // (RT64_CBFD_VTXLIGHT_LOG) for those frames only.
     static int log_room = -1, log_from = 0, log_to = 0;

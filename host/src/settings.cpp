@@ -40,6 +40,8 @@ namespace {
     std::atomic<int> cash_counter_mode{ 0 };
     std::atomic<bool> ledge_grab_on{ false };
     std::atomic<bool> invert_swimming_on{ false };
+    std::atomic<int> longer_breath_mode{ 0 };
+    std::atomic<bool> air_meter_on{ false };
     std::atomic<int> walk_button_mode{ 0 };
 
     enum class Experience : uint32_t { Classic, Modern, Custom };
@@ -334,6 +336,21 @@ namespace {
             "Underwater, <recomp-color primary>pushing up swims up</recomp-color> and pushing down swims down (on a controller or the keyboard). "
             "In the original, swimming underwater steers like a plane: pushing up dives. Swimming on the surface isn't affected.",
             false, &invert_swimming_on);
+        accessibility.add_enum_option("longer_breath", "Longer Breath",
+            "How long Conker can stay <recomp-color primary>underwater</recomp-color> before he starts running out of air. His face in the "
+            "bubble, the gasps and the warnings all follow it."
+            "<br /><recomp-color primary>Original</recomp-color>: as in the original (about 40 seconds)."
+            "<br /><recomp-color primary>Longer</recomp-color>: twice as long (about a minute and a half)."
+            "<br /><recomp-color primary>Much Longer</recomp-color>: four times as long (about three minutes).",
+            { { 0u, "Original", "Original" }, { 1u, "Longer", "Longer" }, { 2u, "MuchLonger", "Much Longer" } }, 0u);
+        accessibility.add_option_change_callback("longer_breath",
+            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                longer_breath_mode = (int)std::get<uint32_t>(cur);
+            });
+        add_bool("air_meter", "Air Meter",
+            "Shows a <recomp-color primary>bar</recomp-color> under Conker's face while he's underwater, emptying as his air runs out, "
+            "green when full, then yellow, orange and red. It follows Longer Breath.",
+            false, &air_meter_on);
         // Help getting around.
         add_bool("ledge_grab", "Ledge Grab",
             "When Conker <recomp-color primary>walks off</recomp-color> anything high (a platform, a table, a box), he catches the edge and hangs on "
@@ -532,5 +549,7 @@ bool conker::qol::always_show_hud() { return always_hud_on; }
 int conker::qol::cash_counter() { return cash_counter_mode; }
 bool conker::qol::ledge_grab() { return ledge_grab_on; }
 bool conker::qol::invert_swimming() { return invert_swimming_on; }
+int conker::qol::longer_breath() { return longer_breath_mode; }
+bool conker::qol::air_meter() { return air_meter_on; }
 int conker::qol::walk_button() { return walk_button_mode; }
 bool conker::qol::longer_spin() { return longer_spin_on; }

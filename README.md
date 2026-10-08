@@ -93,14 +93,16 @@ change any of them yourself.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
   walk instead of run with L, catch the edge when you walk off something high or come up short on a
   jump, swim up by pushing up
-  underwater, turn off the motion blur, keep your health and cash on screen, make the tail spin last
+  underwater, stay underwater longer, show an air meter under Conker's face, turn off the motion blur, keep your health and cash on screen, make the tail spin last
   longer, and pause the game when you alt-tab.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
   resolutions you could see thin lines where they met (PLAY, PAUSED and so on). They're joined
   smoothly now.
 - **Works with the uncensored ROM hack.** ROM hacks that only change the game's data, like the
   uncensored speech, are accepted. Pick one with the **ROM** option in the launcher, which also shows
-  which one you're playing (Original or Uncensored) and switches back any time.
+  which one you're playing (Original, Uncensored or French) and switches back any time.
+- **Plays in French.** Works with the French translation by Corrigo and Djipi (see
+  [Playing in French](#playing-in-french) below).
 - **Texture pack and mod support.** RT64 texture packs (`.rtz`) and N64Recomp mods (`.nrm`) go in
   through the Mods menu and can be switched on and off while you play.
 
@@ -121,6 +123,12 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Linux build.** It builds and runs the game at full speed, and draws correctly, but I've only
   run it inside WSL on Windows with software graphics. Real Linux hardware, controllers and sound
   are untested. Please report how it goes.
+- **Longer Breath and the Air Meter.** Tested underwater in Bat's Tower. The other underwater spots
+  should work the same, but I haven't been through them all.
+- **Invert Swimming while carrying something.** It now works while Conker carries something
+  underwater (like the cogs), but I haven't tested that with a cog in his hands yet.
+- **The French translation.** Tested with a new game (the opening, the bar, the speech bubbles,
+  the menus and the pause screen), not through the whole game.
 - **Rumble, gyro aiming and multiplayer.** These come from CBFD-Recompiled (see below) and are
   included, but I haven't tested them myself yet.
 
@@ -152,6 +160,24 @@ Textures by [GameBeast92](https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k
 used and modified under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The pack is
 shared under the same license, and the `LICENSE.txt` inside it lists what was changed.
 
+## Playing in French
+
+**Corrigo** (text) and **Djipi** (graphics) translated the game into French, and their
+translation works here, with their permission. Thank you to both of them!
+
+1. Download their patch from [emulation64.fr](http://www.emulation64.fr/). It's a patch for the US
+   ROM (MD5 `00E2920665F2329B95797A7EAABC2390`): apply `ConkerFR1-3.bps` to your ROM with a patcher
+   such as [Rom Patcher JS](https://www.marcrobledo.com/RomPatcher.js/) or Floating IPS. No ROM or
+   patched ROM is shared here.
+2. In the launcher, use **ROM** and pick the patched ROM. It shows **ROM: French**. All the
+   speech bubbles are in French, with sharp accented letters if you use the HD Icons pack.
+3. For the French menus, titles and logos (Djipi's graphics), install the
+   `ConkerBFDReloaded-HD-Icons-French` pack (`.rtz`) from the [Releases](../../releases) page the same
+   way as the HD Icons pack, and use it **instead of** HD Icons (turn HD Icons off).
+
+The French pack covers the menus, chapter titles, the pause screen and the logos. Some signs,
+posters and newspapers inside the levels are still in English for now.
+
 ## Known issues
 
 - **The free camera stays out of fixed-camera spots.** Places where the game uses a fixed camera
@@ -171,7 +197,7 @@ shared under the same license, and the `LICENSE.txt` inside it lists what was ch
 
 ## Coming next
 
-Ideas and requests (a 2D minimap, swimming tweaks, a French translation and more) are on the
+Ideas and requests (a 2D minimap, keyboard and mouse button prompts and more) are on the
 [Discussions](../../discussions) board. Upvote the ones you want or add your own.
 
 ## Building it yourself
@@ -210,6 +236,8 @@ None of this would exist without the people whose work it's built on:
 - **[RT64](https://github.com/rt64/rt64)** by Darío and contributors, the renderer.
 - **[GameBeast92's 4K Ultimate Texture Pack](https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k-Ultimate-Texture-Pack)**
   (CC BY 4.0), the textures behind the optional HD Icons pack.
+- **Corrigo** and **Djipi** ([emulation64.fr](http://www.emulation64.fr/)) for the French
+  translation, and Djipi's French graphics in the HD Icons (French) pack, used with permission.
 - GLideN64 and Rice Video, whose texture fingerprints are how texture packs get matched.
 - Fonts: Inter, Noto Emoji, Luckiest Guy, Coming Soon, Poppins (SIL Open Font License) and
   PromptFont.

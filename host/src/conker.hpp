@@ -25,6 +25,17 @@ namespace conker {
     // data changed, like the uncensored speech) work with the recompiled code.
     inline constexpr uint32_t rom_code_start = 0x1000, rom_code_end = 0x25A5D8;
     inline constexpr uint64_t us_code_hash = 0x55ED54C589E9E0D5ULL;
+    // Inside that part sits .game's compressed data (0x188328 to 0x19C7D8: its strings, such as the
+    // multiplayer "lap"), which a translation can change while the code stays the same. So the code
+    // around it must match (XXH3-64 of both sides together), and the block must be the US ROM's or
+    // a known translation's: the French patch by Corrigo and Djipi (v1.3), which only changes "lap".
+    inline constexpr uint32_t rom_game_data_start = 0x188328, rom_game_data_end = 0x19C7D8;
+    inline constexpr uint64_t us_code_around_game_data_hash = 0xC5617F3F5DBB4DF9ULL;
+    inline constexpr uint64_t known_game_data_hashes[] = {
+        0x7AC0A772526269F5ULL, // the US ROM
+        0x4238B3E2AF4E2E79ULL, // the French translation
+    };
+    inline constexpr uint64_t french_rom_hash = 0xF78F2024E0B8F2A3ULL; // the French translation (v1.3)
 
     // segments.cpp: the game's code sections and its TLB-mapped pages.
     void register_code_sections();
@@ -118,6 +129,8 @@ namespace conker {
         void apply_swim(float* y); // player 1's stick: Invert Swimming
         int walk_button(); // 0 off, 1 hold L, 2 toggle L
         bool invert_swimming();
+        int longer_breath(); // 0 original, 1 twice, 2 four times
+        bool air_meter();
         // settings.cpp: the options.
         bool saving_icon();
         bool pause_unfocused();

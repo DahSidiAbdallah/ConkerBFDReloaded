@@ -33,6 +33,8 @@
 
 #include <SDL.h>
 
+extern SDL_Window* window; // frontend.cpp
+
 #include "recomp.h"
 #include "librecomp/game.hpp"
 #include "ultramodern/ultramodern.hpp"
@@ -208,6 +210,131 @@ namespace {
         }
     }
 
+    // Air Meter (Accessibility): a bar under the game's air face (top right, drawn in the 4:3 picture's
+    // space: its middle at x 276, its bottom at y 115 of 320 x 240; measured), emptying as Conker's
+    // time underwater (+0xB2) goes from 0 to 1561, where he starts losing health. Shown only with the face
+    // (and after an area's opening circle), fading in and out with it.
+    std::atomic<uint16_t> air_used{ 0 };
+    std::atomic<bool> air_paused{ false };
+    std::atomic<uint8_t> air_face{ 0 };
+    std::atomic<int32_t> air_face_drawn{ -1 }; // the area's timer when func_150911F4 last drew the face
+    std::atomic<int32_t> air_area_timer{ 0 };
+    constexpr int32_t area_opening = 190;
+    float meter_fade = 0.0f; // fading in once wanted
+    float meter_opacity_shown = -1.0f;
+    constexpr float air_limit = 1561.0f;
+    constexpr float meter_x = 276.0f, meter_y = 121.0f, meter_w = 78.0f, meter_h = 8.0f; // N64 units
+    bool meter_created = false;
+    recompui::ContextId meter_context = recompui::ContextId::null();
+    recompui::Element* meter_frame = nullptr;
+    recompui::Element* meter_fill = nullptr;
+    float meter_shown = -1.0f;
+    float meter_aspect = 0.0f;
+    float meter_smooth = 1.0f;
+    clock::time_point meter_last{};
+
+    recompui::Color meter_colour(float air) {
+        // green (full) -> yellow -> orange -> red (empty)
+        auto mix = [](recompui::Color a, recompui::Color b, float t) {
+            auto m = [t](uint8_t x, uint8_t y) { return (uint8_t)std::lround(x + (y - x) * t); };
+            return recompui::Color{ m(a.r, b.r), m(a.g, b.g), m(a.b, b.b), 0xFF };
+        };
+        const recompui::Color green{ 0x6E, 0xD2, 0x4A, 0xFF }, yellow{ 0xE6, 0xD2, 0x3C, 0xFF },
+            orange{ 0xF0, 0x96, 0x2D, 0xFF }, red{ 0xE6, 0x3C, 0x32, 0xFF };
+        if (air > 0.66f) return mix(yellow, green, (air - 0.66f) / 0.34f);
+        if (air > 0.33f) return mix(orange, yellow, (air - 0.33f) / 0.33f);
+        return mix(red, orange, air / 0.33f);
+    }
+
+    void place_meter(float aspect) {
+        // In the window, the game's 4:3 picture is centred and as tall as the window.
+        const float sx = 100.0f / (aspect * 240.0f); // % of width per N64 unit (the picture is 4:3, as tall as the window)
+        const float sy = 100.0f / 240.0f;                                              // % of height per N64 unit
+        meter_frame->set_left(50.0f + (meter_x - meter_w / 2 - 160.0f) * sx, recompui::Unit::Percent);
+        meter_frame->set_top(meter_y * sy, recompui::Unit::Percent);
+        meter_frame->set_width(meter_w * sx, recompui::Unit::Percent);
+        meter_frame->set_height(meter_h * sy, recompui::Unit::Percent);
+    }
+
+    void create_meter() {
+        meter_context = recompui::create_context();
+        meter_context.open();
+        meter_context.set_captures_input(false);
+        meter_context.set_captures_mouse(false);
+        recompui::Element* root = meter_context.get_root_element();
+        meter_frame = meter_context.create_element<recompui::Element>(root);
+        meter_frame->set_position(recompui::Position::Absolute);
+        meter_frame->set_background_color({ 0x00, 0x00, 0x00, 0x8C });
+        meter_frame->set_border_width(2.0f);
+        meter_frame->set_border_color({ 0xFF, 0xFF, 0xFF, 0xE6 });
+        meter_frame->set_border_radius(100.0f);
+        meter_fill = meter_context.create_element<recompui::Element>(meter_frame);
+        meter_fill->set_position(recompui::Position::Absolute);
+        meter_fill->set_left(0.0f);
+        meter_fill->set_top(0.0f);
+        meter_fill->set_height(100.0f, recompui::Unit::Percent);
+        meter_fill->set_width(100.0f, recompui::Unit::Percent);
+        meter_fill->set_border_radius(100.0f);
+        meter_context.close();
+        meter_created = true;
+    }
+
+    void update_meter() {
+        const uint16_t used = air_used.load();
+        const bool cutscene = seconds_since(cutscene_seen.load()) < 0.25;
+        const uint8_t face = air_face.load();
+        // Drawn within the last ~third of a second of play (the area's timer stops with the game, and
+        // starts over in a new area).
+        const int32_t since_drawn = air_area_timer.load() - air_face_drawn.load();
+        const bool drawn = air_face_drawn.load() >= 0 && since_drawn > -20 && since_drawn < 20; // (read a frame apart: either way)
+        const bool wanted = ui_ready && conker::qol::air_meter() && face != 0 && drawn && air_area_timer.load() >= area_opening &&
+            !air_paused.load() && !cutscene && ultramodern::is_game_started();
+        if (!wanted) {
+            if (meter_created && recompui::is_context_shown(meter_context)) {
+                recompui::hide_context(meter_context);
+            }
+            meter_smooth = 1.0f;
+            meter_fade = 0.0f;
+            return;
+        }
+        if (!meter_created) {
+            create_meter();
+        }
+        if (!recompui::is_context_shown(meter_context)) {
+            recompui::show_context(meter_context, "");
+            meter_shown = -1.0f;
+            meter_aspect = 0.0f;
+            meter_opacity_shown = -1.0f;
+            meter_last = clock::now();
+        }
+        // Follow the air smoothly (the counter steps a frame at a time).
+        const float air = std::clamp(1.0f - used / air_limit, 0.0f, 1.0f);
+        const clock::time_point now = clock::now();
+        const float dt = std::min(0.1f, std::chrono::duration<float>(now - meter_last).count());
+        meter_last = now;
+        meter_smooth += (air - meter_smooth) * (1.0f - std::exp(-dt / 0.15f));
+        meter_fade = std::min(1.0f, meter_fade + dt / 0.3f);
+        int w = 0, h = 0;
+        if (window != nullptr) SDL_GetWindowSize(window, &w, &h);
+        const float aspect = (w > 0 && h > 0) ? (float)w / (float)h : 16.0f / 9.0f;
+        const float opacity = std::round(face / 255.0f * meter_fade * 50.0f) / 50.0f;
+        if (std::abs(meter_smooth - meter_shown) > 0.002f || aspect != meter_aspect || opacity != meter_opacity_shown) {
+            meter_context.open();
+            if (opacity != meter_opacity_shown) {
+                meter_frame->set_opacity(opacity);
+                meter_opacity_shown = opacity;
+            }
+            if (aspect != meter_aspect) {
+                place_meter(aspect);
+                meter_aspect = aspect;
+            }
+            meter_fill->set_width(std::max(0.0f, meter_smooth) * 100.0f, recompui::Unit::Percent);
+            meter_fill->set_background_color(meter_colour(meter_smooth));
+            meter_context.close();
+            meter_shown = meter_smooth;
+        }
+    }
+
     // Toggle R-Look / Toggle Crouch.
     struct Toggle {
         bool was_down = false;
@@ -250,6 +377,7 @@ void conker::qol::on_vi() {
 
 void conker::qol::update() {
     update_skip();
+    update_meter();
     const clock::time_point now = clock::now();
     if (now - last_check >= check_every) {
         last_check = now;
@@ -312,8 +440,11 @@ namespace {
     // animations. Swimming (0x27, also "on the ground") and the air (jumps, the tail spin) keep the
     // whole stick. Set each VI from his object (on_vi_memory), read on the input thread.
     std::atomic<bool> on_foot{ false };
-    // Invert Swimming: swimming underwater (animation 0xD1 floating, 0xCE swimming; on the surface
-    // he has others, 0x6C, 0x27), where the stick steers like a plane (up dives). Set with on_foot.
+    // Invert Swimming: swimming underwater, where the stick steers like a plane (up dives). His
+    // underwater byte (+0xAD: 1 under, 0 on the surface and on land; what his air runs on) rather than
+    // his animations (0xD1 floating, 0xCE swimming), which carrying something (a cog) changes. Not
+    // when standing on the ground (flags 0x01; swimming, even along the bottom, is 0x00). Set with
+    // on_foot.
     std::atomic<bool> underwater{ false };
     bool on_foot_animation(uint16_t animation) {
         switch (animation) {
@@ -334,7 +465,38 @@ static void update_on_foot(uint8_t* rdram) {
     const uint8_t flags = (uint8_t)((uint32_t)MEM_W(0, (gpr)(player + 0x100)) >> 24);
     const uint16_t animation = (uint16_t)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16);
     on_foot = flags == 0x01 && on_foot_animation(animation);
-    underwater = animation == 0xD1 || animation == 0xCE;
+    // Air Meter: Conker's time underwater (+0xB2, see Longer Breath), while the game isn't paused.
+    air_used = (uint16_t)MEM_HU(0, (gpr)(player + 0xB2));
+    air_paused = MEM_BU(0, (gpr)(int32_t)0x800BEAC0) != 0;
+    // The air face's own visibility (D_800D24C8 + 0xBA: 0 hidden, up to 255 as it fades in; func_150911F4
+    // only draws it when it isn't 0): the bar comes, fades and goes with it.
+    air_face = (uint8_t)MEM_BU(0, (gpr)(int32_t)(0x800D24C8 + 0xBA));
+    // The area's timer (refreshes since it started): its opening circle covers the first ~180.
+    air_area_timer = MEM_W(0, (gpr)(int32_t)0x800E0A90);
+    underwater = MEM_BU(0, (gpr)(player + 0xAD)) != 0 && flags != 0x01;
+}
+
+// Longer Breath: func_1504B0FC adds the frame's step (D_800BE9E4) to Conker's time underwater
+// (+0xB2) at 0x1504B4E8 ($t4 + $t5); at 721 he gasps and his face starts turning purple, at 1501
+// he gasps again, from 1561 he loses health each second (about 43 seconds in, measured). The step
+// is divided here, with the remainder carried over, so all of it comes later.
+extern "C" void conker_longer_breath(uint8_t* rdram, recomp_context* ctx) {
+    constexpr int32_t player = (int32_t)0x800CC2D0;
+    const int mode = conker::qol::longer_breath();
+    if (mode == 0 || (int32_t)ctx->r16 != player) {
+        return;
+    }
+    static double carried = 0.0;
+    const double divisor = mode == 1 ? 2.0 : 4.0;
+    carried += (double)(int32_t)ctx->r13 / divisor;
+    const int32_t step = (int32_t)carried;
+    carried -= step;
+    ctx->r13 = step;
+}
+
+// func_150911F4 (draws the air face), past its "hidden" check (0x1509122C): it's on screen this frame.
+extern "C" void conker_air_face_drawn(uint8_t* rdram, recomp_context* ctx) {
+    air_face_drawn = MEM_W(0, (gpr)(int32_t)0x800E0A90);
 }
 
 void conker::qol::apply_swim(float* y) {

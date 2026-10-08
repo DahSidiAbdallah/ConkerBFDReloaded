@@ -14,6 +14,7 @@ if exist C:\ConkerRecompWin\test_crosshair.flag set CONKER_TEST_CROSSHAIR=1
 if exist C:\ConkerRecompWin\cam_trace.flag set CONKER_CAM_TRACE=1
 if exist C:\ConkerRecompWin\cam_nozoom.flag set CONKER_CAM_NOZOOM=1
 if exist C:\ConkerRecompWin\grab_debug.flag set CONKER_GRAB_DEBUG=1
+if exist C:\ConkerRecompWin\test_text.txt set /p CONKER_TEST_TEXT=<C:\ConkerRecompWin\test_text.txt
 if exist C:\ConkerRecompWin\test_poke.txt set /p CONKER_TEST_POKE=<C:\ConkerRecompWin\test_poke.txt
 if exist C:\ConkerRecompWin\vtxlight.flag set RT64_CBFD_VTXLIGHT_LOG=C:\ConkerRecompWin\snaps\vtxlight.txt
 if exist C:\ConkerRecompWin\cull43.flag set CONKER_TEST_43_CULLING=1

@@ -249,8 +249,8 @@ namespace {
         set(color::Background1, { 0x0B, 0x06, 0x04, 0xFF });
     }
 
-    // The ROM option: shows which ROM is in use ("ROM: Original", "ROM: Uncensored", or "ROM: Modified"
-    // for another hack), and picks another one to play from now on: the US ROM, or a ROM hack of it
+    // The ROM option: shows which ROM is in use ("ROM: Original", "ROM: Uncensored", "ROM: French", or
+    // "ROM: Modified" for another hack), and picks another one to play from now on: the US ROM, or a ROM hack of it
     // that only changes the game's data (main.cpp's accept_rom). It replaces the stored one; saves
     // and settings stay.
     constexpr uint64_t uncensored_rom_hash = 0xAC445026C8F77A94ULL; // the uncensored speech hack
@@ -262,7 +262,8 @@ namespace {
             return "Change ROM";
         }
         const uint64_t hash = XXH3_64bits(rom.data(), rom.size());
-        return hash == conker::us_rom_hash ? "ROM: Original" : hash == uncensored_rom_hash ? "ROM: Uncensored" : "ROM: Modified";
+        return hash == conker::us_rom_hash ? "ROM: Original" : hash == uncensored_rom_hash ? "ROM: Uncensored" :
+            hash == conker::french_rom_hash ? "ROM: French" : "ROM: Modified";
     }
 
     std::filesystem::path stored_rom_path(const std::u8string& game_id) {

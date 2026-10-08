@@ -44,6 +44,9 @@ rm -rf "$A/mixed"
 "$P" "$T/mix_pack.py" "$A/originals" "$A/pack4k" "$A/layout.json" "$A/places/rect_places.txt" "$A/mixed" \
   --restyle 99779e,e70120 --redraw 46c2ab,186ece 2>/dev/null | tail -1
 "$P" "$T/make_new_game.py" "$A/mixed" 2>/dev/null
+# The speech bubbles' accented capitals (É È Ê À Â Ç Ù Û Î Ï Ô), used by translations (texdump_french:
+# a run of the French translation with all of them on screen): made from the pack's HD letters.
+"$P" "$T/make_accents.py" "$A/originals" "$A/mixed"
 # The save files' location pictures (64x22, the bar menu's GAME pictures): the 4K pack's versions
 # land on the wrong pictures (other places, faded copies), so the game's own are kept.
 "$P" - "$A/originals" "$A/mixed" <<'PY'
@@ -65,9 +68,18 @@ for h in da5087ca2823f435 c2e43ec56e5f408a a8cf89deb84cfd87 a47972f843956c5a 920
   rm -f "$A/mixed/$h.png"
 done
 "$P" "$T/make_thumb.py" "$A" "$R/icons_work/hd_icons_thumb.png"
-"$P" "$T/make_pack.py" "$A/mixed" "$R/icons_work/conker_hd_icons.rtz" --id conker_hd_icons --name "HD Icons" --version 1.3.2 \
+"$P" "$T/make_pack.py" "$A/mixed" "$R/icons_work/conker_hd_icons.rtz" --id conker_hd_icons --name "HD Icons" --version 1.3.3 \
   --description "Sharper HUD, menu and text pictures, with the original colours and shapes kept. Textures by GameBeast92 (Conker's Bad Fur Day 4K Ultimate Texture Pack, github.com/GameBeast92), modified, under CC BY 4.0. See LICENSE.txt in the pack." \
   --short "Sharper HUD and menus" --author dahmedvall95 --author "GameBeast92 (4K texture artwork)" \
   --thumb "$R/icons_work/hd_icons_thumb.png" --license "$T/HD_ICONS_LICENSE.txt"
 CFG=$(ls -d /mnt/c/Users/*/AppData/Local/ConkerBFDReloaded | head -1)
 cp "$R/icons_work/conker_hd_icons.rtz" "$CFG/mods/" && echo "installed in $CFG/mods"
+# The French version (HD Icons (French)): the same pictures with the French translation's menus,
+# titles and logos (Djipi's graphics from emulation64.fr's patch, tools/packs/conker_fr.htc; used
+# with permission) in place of the English ones. Not installed: it's for players of the French ROM.
+"$P" "$T/make_french_pack.py" $W/tools/packs/conker_fr.htc "$A/mixed" "$A/mixed_fr" $W/texdump* $W/scandump*
+cat "$T/HD_ICONS_FR_LICENSE.txt" "$T/HD_ICONS_LICENSE.txt" > "$A/license_fr.txt"
+"$P" "$T/make_pack.py" "$A/mixed_fr" "$R/icons_work/conker_hd_icons_fr.rtz" --id conker_hd_icons_fr --name "HD Icons (French)" --version 1.3.3 \
+  --description "The HD Icons pack with the French translation's menus, titles and logos, for the French ROM (use it instead of HD Icons). French graphics by Djipi (emulation64.fr), used with permission. HD textures by GameBeast92, modified, under CC BY 4.0. See LICENSE.txt in the pack." \
+  --short "HD Icons, French menus" --author dahmedvall95 --author "Djipi (French graphics)" --author "GameBeast92 (4K texture artwork)" \
+  --thumb "$R/icons_work/hd_icons_thumb.png" --license "$A/license_fr.txt"
