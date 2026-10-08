@@ -93,7 +93,7 @@ change any of them yourself.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
   walk instead of run with L, catch the edge when you walk off something high or come up short on a
   jump, swim up by pushing up
-  underwater, stay underwater longer, show an air meter under Conker's face, turn off the motion blur, keep your health and cash on screen, make the tail spin last
+  underwater, stay underwater longer, show an air meter under Conker's face, turn off the motion blur and the drunken camera sway, keep your health and cash on screen, make the tail spin last
   longer, and pause the game when you alt-tab.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
   resolutions you could see thin lines where they met (PLAY, PAUSED and so on). They're joined
@@ -125,8 +125,9 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
   are untested. Please report how it goes.
 - **Longer Breath and the Air Meter.** Tested underwater in Bat's Tower. The other underwater spots
   should work the same, but I haven't been through them all.
-- **Invert Swimming while carrying something.** It now works while Conker carries something
-  underwater (like the cogs), but I haven't tested that with a cog in his hands yet.
+- **Invert Swimming while carrying something.** It works while Conker carries something
+  underwater (like the cogs), and only underwater, not on the surface, but I haven't tested it with
+  a cog in his hands yet.
 - **The French translation.** Tested with a new game (the opening, the bar, the speech bubbles,
   the menus and the pause screen), not through the whole game.
 - **Rumble, gyro aiming and multiplayer.** These come from CBFD-Recompiled (see below) and are
@@ -192,6 +193,10 @@ posters and newspapers inside the levels are still in English for now.
   hack itself, not added by this project.
 - **Ledge Grab and corners.** Conker catches straight edges, not the very tip of a corner, the same
   as the game's own ledge grabs. Step off along an edge rather than over a corner.
+- **Ledge Grab getting stuck (rare).** Once, near Bat's Tower's cogs, Conker got stuck climbing up
+  and slid down the wall holding on to nothing. I couldn't make it happen again, so there's now a
+  safety net: if it happens he lets go and falls instead. If you see it, please
+  [open an issue](../../issues) saying where it happened, with a screenshot if you can.
 - **The free camera and low obstacles.** The camera keeps the top of Conker's head in view, so a low
   post or fence between you and him can still hide his body.
 

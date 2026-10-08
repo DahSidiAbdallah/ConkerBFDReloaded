@@ -175,7 +175,137 @@ extern "C" void conker_probe_pause(uint8_t* rdram, recomp_context* ctx, int tag)
 extern "C" void conker_pause_background_tick(uint8_t* rdram); // pause_background.cpp
 
 // Also the pause background's clock (not only testing).
+extern "C" void func_1501D348(uint8_t* rdram, recomp_context* ctx); // the game: go to a room
+
+namespace {
+    float read_real(uint8_t* rdram, int32_t address) {
+        const int32_t bits = MEM_W(0, (gpr)address);
+        float value;
+        std::memcpy(&value, &bits, sizeof value);
+        return value;
+    }
+
+    void write_real(uint8_t* rdram, int32_t address, float value) {
+        int32_t bits;
+        std::memcpy(&bits, &value, sizeof bits);
+        MEM_W(0, (gpr)address) = bits;
+    }
+}
+
+// Testing aids, for starting a test anywhere in seconds instead of playing up to it:
+// CONKER_TEST_WARP=seconds:room:entrance (room in hex) sends Conker to that room and entrance at that
+// time, as the game's own exits do (func_1501D348(room, entrance, 0, 0, 0)); several can follow,
+// separated by ';'. Then
+// CONKER_TEST_PLACE=seconds:x:y:z:facing (facing in 65536ths of a turn) puts him at a spot.
+// Several places can follow, separated by ';'. Run at the start of the game's frame.
+static void test_travel(uint8_t* rdram, recomp_context* ctx) {
+    struct Place { double at; float x, y, z; int facing; bool done; };
+    struct Warp { double at; int room, entrance; bool done; };
+    static std::vector<Warp> warps;
+    static std::vector<Place> places;
+    static const bool parsed = [] {
+        if (const char* w = std::getenv("CONKER_TEST_WARP")) {
+            std::string all(w);
+            size_t pos = 0;
+            while (pos < all.size()) {
+                size_t end = all.find(';', pos);
+                Warp warp{ -1.0, 0, 0, false };
+                if (std::sscanf(all.substr(pos, end - pos).c_str(), "%lf:%x:%d", &warp.at, &warp.room, &warp.entrance) == 3) {
+                    warps.push_back(warp);
+                }
+                if (end == std::string::npos) break;
+                pos = end + 1;
+            }
+        }
+        if (const char* p = std::getenv("CONKER_TEST_PLACE")) {
+            std::string all(p);
+            size_t pos = 0;
+            while (pos < all.size()) {
+                size_t end = all.find(';', pos);
+                Place place{ -1.0, 0, 0, 0, 0, false };
+                if (std::sscanf(all.substr(pos, end - pos).c_str(), "%lf:%f:%f:%f:%d", &place.at, &place.x, &place.y, &place.z, &place.facing) == 5) {
+                    places.push_back(place);
+                }
+                if (end == std::string::npos) break;
+                pos = end + 1;
+            }
+        }
+        return true;
+    }();
+    (void)parsed;
+    const double t = conker::testing::game_seconds();
+    for (Warp& warp : warps) {
+        if (warp.done || t < warp.at) {
+            continue;
+        }
+        warp.done = true;
+        recomp_context c = *ctx;
+        c.r29 = ctx->r29 - 0x40; // stack room below the frame's
+        MEM_W(0x10, c.r29) = 0;
+        c.r4 = warp.room; c.r5 = warp.entrance; c.r6 = 0; c.r7 = 0;
+        func_1501D348(rdram, &c);
+        std::printf("[testing] warp to room %02X entrance %d\n", warp.room, warp.entrance);
+        break;
+    }
+    constexpr int32_t player = (int32_t)0x800CC2D0;
+    for (Place& place : places) {
+        if (place.done || t < place.at) {
+            continue;
+        }
+        place.done = true;
+        write_real(rdram, player + 0x14, place.x);
+        write_real(rdram, player + 0x18, place.y);
+        write_real(rdram, player + 0x1C, place.z);
+        for (int field : { 0x20, 0x3C, 0x44, 0x1F4 }) { // no speed left over
+            write_real(rdram, player + field, 0.0f);
+        }
+        MEM_H(0x76, (gpr)player) = (int16_t)place.facing;
+        std::printf("[testing] placed at %.1f %.1f %.1f facing %04X (room %02X)\n", place.x, place.y, place.z,
+            place.facing & 0xFFFF, (int)MEM_W(0, (gpr)(int32_t)0x800BE9F0));
+    }
+}
+
+// Testing aid: CONKER_TEST_CAMERA_FLAGS=seconds:hexbits ORs those bits into the camera's +0x5F0 as
+// func_1512D070 (its sway) starts, from then on (0x8: the sway Conker's drunkenness turns on).
+extern "C" void conker_test_camera_flags(uint8_t* rdram, recomp_context* ctx) {
+    static double at = -1.0; static unsigned bits = 0;
+    static const bool parsed = [] {
+        if (const char* c = std::getenv("CONKER_TEST_CAMERA_FLAGS")) std::sscanf(c, "%lf:%x", &at, &bits);
+        return true;
+    }();
+    (void)parsed;
+    if (at < 0 || conker::testing::game_seconds() < at) {
+        return;
+    }
+    MEM_W(0x5F0, ctx->r4) = MEM_W(0x5F0, ctx->r4) | (int32_t)bits;
+}
+
+extern "C" void conker_ledge_grab_watchdog(uint8_t* rdram, recomp_context* ctx); // ledge_grab.cpp
+
+// Testing aid: CONKER_TEST_SINK=seconds:units moves Conker down by that much every game frame from
+// then on while he's hanging, climbing up or hopping up (stands in for getting stuck on a ledge, for
+// Ledge Grab's safety net).
+static void test_sink(uint8_t* rdram) {
+    static double at = -1.0; static float units = 0.0f;
+    static const bool parsed = [] {
+        if (const char* c = std::getenv("CONKER_TEST_SINK")) std::sscanf(c, "%lf:%f", &at, &units);
+        return true;
+    }();
+    (void)parsed;
+    if (at < 0 || conker::testing::game_seconds() < at) {
+        return;
+    }
+    constexpr int32_t player = (int32_t)0x800CC2D0;
+    const uint16_t anim = (uint16_t)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16);
+    if (anim == 0x42 || anim == 0x40 || anim == 0xEA) {
+        write_real(rdram, player + 0x18, read_real(rdram, player + 0x18) - units);
+    }
+}
+
 extern "C" void conker_probe_frame_end(uint8_t* rdram, recomp_context* ctx) {
+    test_travel(rdram, ctx);
+    test_sink(rdram);
+    conker_ledge_grab_watchdog(rdram, ctx);
     conker_pause_background_tick(rdram);
     conker_probe_pause(rdram, ctx, 0);
     static const bool probe = std::getenv("CONKER_PROBE") != nullptr;

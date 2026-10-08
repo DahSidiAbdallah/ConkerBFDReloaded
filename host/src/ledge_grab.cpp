@@ -26,7 +26,13 @@
 //
 // One catch per fall: once he has hung, letting go or dropping doesn't catch again until he's back
 // on the ground (otherwise letting go took several presses).
+//
+// A safety net: hanging (0x42), climbing up (0x40) and hopping up (0xEA) never take him down, so if
+// he's been in them a while and has slid down well below where he was, he's holding on to nothing (a
+// player saw it once, near Bat's Tower's cogs: stuck in the climb, sinking down the wall). Then he
+// lets go and falls as usual.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -86,6 +92,52 @@ namespace {
     uint16_t animation(uint8_t* rdram) {
         return (uint16_t)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16);
     }
+
+    constexpr uint16_t climbing_animation = 0x40, hopping_animation = 0xEA, falling_animation = 0x38;
+    constexpr int32_t stuck_after = 48;    // area timer ticks (60 a second) in those animations
+    constexpr float stuck_sink = 40.0f;    // this far below the highest he was in them
+    struct Hold {
+        bool on = false;
+        int32_t since = 0;
+        float highest = 0.0f;
+    } hold;
+}
+
+extern "C" void func_1505E650(uint8_t* rdram, recomp_context* ctx); // the game: set an object's animation
+
+// Each frame, at its start (testing.cpp's frame hook): the safety net (above).
+extern "C" void conker_ledge_grab_watchdog(uint8_t* rdram, recomp_context* ctx) {
+    const uint16_t anim = animation(rdram);
+    const bool holding = anim == hanging_animation || anim == climbing_animation || anim == hopping_animation;
+    if (!holding || !conker::qol::ledge_grab()) {
+        hold.on = false;
+        return;
+    }
+    const int32_t timer = MEM_W(0, (gpr)(int32_t)0x800E0A90);
+    const float y = real(rdram, player + 0x18);
+    if (!hold.on || timer < hold.since) {
+        hold = { true, timer, y };
+        return;
+    }
+    hold.highest = std::max(hold.highest, y);
+    if (timer - hold.since < stuck_after || hold.highest - y < stuck_sink) {
+        return;
+    }
+    // Let go: the falling animation, in the air as when walking off, no speed left over.
+    recomp_context c = *ctx;
+    c.r29 = ctx->r29 - 0x40;
+    MEM_W(0x10, c.r29) = 0;
+    MEM_W(0x14, c.r29) = 0;
+    MEM_W(0x18, c.r29) = 0;
+    c.r4 = player; c.r5 = falling_animation; c.r6 = 0x3F800000; c.r7 = 0; // 1.0f, 0.0f
+    func_1505E650(rdram, &c);
+    MEM_B(0x100, (gpr)player) = 0x11;
+    set_real(rdram, player + 0x20, 0.0f);
+    set_real(rdram, player + 0x24, walking_gravity);
+    set_real(rdram, player + 0x1CC, y); // a fall from here, not from the ledge
+    fall.caught = true;
+    hold.on = false;
+    std::printf("[grab] safety net: let go after sliding %.0f below the hold (animation %02X)\n", hold.highest - y, anim);
 }
 
 // func_150AC3E4 before 0x150AC474: $t0 is the mask about to be stored, $a3 the object falling.

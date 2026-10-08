@@ -10,7 +10,7 @@
 //   CBFD-Recompiled's Skip Any Cutscene mod allows (MIT). Held, not pressed, so it can't happen by
 //   accident: "Hold to Skip" shows in the corner with a ring filling as L is held. A hook where
 //   func_1501E05C (the game's "skip the playing cutscene?" check) returns, recomp/conker.toml.
-// - Reduce Motion Effects: no motion blur (the drunk ghosting at the start of the game), for players
+// - Reduce Motion Effects: no motion blur (the drunk ghosting) and no drunken camera sway, for players
 //   who get motion sick.
 // - Always Show Health: health (chocolate) stays on screen instead of sliding away.
 // - Longer Tail Spin: the spin after a jump (A twice) floats and glides for longer.
@@ -213,12 +213,14 @@ namespace {
     // Air Meter (Accessibility): a bar under the game's air face (top right, drawn in the 4:3 picture's
     // space: its middle at x 276, its bottom at y 115 of 320 x 240; measured), emptying as Conker's
     // time underwater (+0xB2) goes from 0 to 1561, where he starts losing health. Shown only with the face
-    // (and after an area's opening circle), fading in and out with it.
+    // (and after an area's opening circle), fading in and out with it. Out of air, each hit takes 60
+    // off the count (back to 1501), so from 1561 on it stays empty until he's had air again.
     std::atomic<uint16_t> air_used{ 0 };
     std::atomic<bool> air_paused{ false };
     std::atomic<uint8_t> air_face{ 0 };
     std::atomic<int32_t> air_face_drawn{ -1 }; // the area's timer when func_150911F4 last drew the face
     std::atomic<int32_t> air_area_timer{ 0 };
+    std::atomic<bool> drowning{ false }; // the game's drowning scene (animations 0x28, 0x24): the screen closes in
     constexpr int32_t area_opening = 190;
     float meter_fade = 0.0f; // fading in once wanted
     float meter_opacity_shown = -1.0f;
@@ -231,6 +233,7 @@ namespace {
     float meter_shown = -1.0f;
     float meter_aspect = 0.0f;
     float meter_smooth = 1.0f;
+    bool out_of_air = false;
     clock::time_point meter_last{};
 
     recompui::Color meter_colour(float air) {
@@ -288,13 +291,16 @@ namespace {
         const int32_t since_drawn = air_area_timer.load() - air_face_drawn.load();
         const bool drawn = air_face_drawn.load() >= 0 && since_drawn > -20 && since_drawn < 20; // (read a frame apart: either way)
         const bool wanted = ui_ready && conker::qol::air_meter() && face != 0 && drawn && air_area_timer.load() >= area_opening &&
-            !air_paused.load() && !cutscene && ultramodern::is_game_started();
+            !air_paused.load() && !cutscene && !drowning.load() && ultramodern::is_game_started();
         if (!wanted) {
             if (meter_created && recompui::is_context_shown(meter_context)) {
                 recompui::hide_context(meter_context);
             }
             meter_smooth = 1.0f;
             meter_fade = 0.0f;
+            if (air_used.load() < 1501) {
+                out_of_air = false;
+            }
             return;
         }
         if (!meter_created) {
@@ -308,11 +314,19 @@ namespace {
             meter_last = clock::now();
         }
         // Follow the air smoothly (the counter steps a frame at a time).
-        const float air = std::clamp(1.0f - used / air_limit, 0.0f, 1.0f);
+        if (used >= air_limit) {
+            out_of_air = true;
+        } else if (used < 1501) {
+            out_of_air = false;
+        }
+        const float air = out_of_air ? 0.0f : std::clamp(1.0f - used / air_limit, 0.0f, 1.0f);
         const clock::time_point now = clock::now();
         const float dt = std::min(0.1f, std::chrono::duration<float>(now - meter_last).count());
         meter_last = now;
         meter_smooth += (air - meter_smooth) * (1.0f - std::exp(-dt / 0.15f));
+        if (air == 0.0f && meter_smooth < 0.01f) {
+            meter_smooth = 0.0f; // all the way empty, not a sliver
+        }
         meter_fade = std::min(1.0f, meter_fade + dt / 0.3f);
         int w = 0, h = 0;
         if (window != nullptr) SDL_GetWindowSize(window, &w, &h);
@@ -440,11 +454,23 @@ namespace {
     // animations. Swimming (0x27, also "on the ground") and the air (jumps, the tail spin) keep the
     // whole stick. Set each VI from his object (on_vi_memory), read on the input thread.
     std::atomic<bool> on_foot{ false };
-    // Invert Swimming: swimming underwater, where the stick steers like a plane (up dives). His
-    // underwater byte (+0xAD: 1 under, 0 on the surface and on land; what his air runs on) rather than
-    // his animations (0xD1 floating, 0xCE swimming), which carrying something (a cog) changes. Not
-    // when standing on the ground (flags 0x01; swimming, even along the bottom, is 0x00). Set with
-    // on_foot.
+    // Invert Swimming: swimming underwater, where the stick steers like a plane (up dives). Underwater
+    // is where the game itself counts his air (below): func_1504B0FC adds to it (Longer Breath's hook) only
+    // while he's under, carrying something (a cog) or not; on the surface it doesn't, and his
+    // underwater byte (+0xAD) stays set there after a dive, so it can't tell. The area timer (60 a
+    // second) when the air was last counted; set with on_foot.
+    std::atomic<int32_t> air_counted_at{ -1000 };
+    std::atomic<int32_t> air_counted_since{ 0 }; // when the counting last started (after a break)
+    bool surface_swimming_animation(uint16_t animation) {
+        switch (animation) {
+            case 0x22: case 0x27: case 0x6C: // swimming on the surface
+            case 0xCC:                       // treading water
+            case 0x8B:                       // wading
+                return true;
+            default:
+                return false;
+        }
+    }
     std::atomic<bool> underwater{ false };
     bool on_foot_animation(uint16_t animation) {
         switch (animation) {
@@ -460,6 +486,13 @@ namespace {
     }
 }
 
+static float real_at(uint8_t* rdram, int32_t address) {
+    const int32_t bits = MEM_W(0, (gpr)address);
+    float value;
+    std::memcpy(&value, &bits, sizeof value);
+    return value;
+}
+
 static void update_on_foot(uint8_t* rdram) {
     constexpr int32_t player = (int32_t)0x800CC2D0;
     const uint8_t flags = (uint8_t)((uint32_t)MEM_W(0, (gpr)(player + 0x100)) >> 24);
@@ -473,7 +506,27 @@ static void update_on_foot(uint8_t* rdram) {
     air_face = (uint8_t)MEM_BU(0, (gpr)(int32_t)(0x800D24C8 + 0xBA));
     // The area's timer (refreshes since it started): its opening circle covers the first ~180.
     air_area_timer = MEM_W(0, (gpr)(int32_t)0x800E0A90);
-    underwater = MEM_BU(0, (gpr)(player + 0xAD)) != 0 && flags != 0x01;
+    // Out of air for good, the game plays his drowning (0x28, then 0x24) and closes the screen down to a
+    // circle around him, hiding the face: the bar goes with it.
+    drowning = animation == 0x28 || animation == 0x24;
+    // Under: his air counted within the last few game frames (it's counted once a frame, at 30 a
+    // second), not in a surface swimming animation, not walking along the bottom, and either well
+    // below the water's surface (+0x118; swimming on it his middle is about 41 below, bobbing to 45)
+    // or counting for over half a second: on the surface the game counts air for the moment a bob
+    // or a stroke dips him under, and those mustn't flip the stick back and forth.
+    const int32_t now_timer = air_area_timer.load();
+    const int32_t since_counted = now_timer - air_counted_at.load();
+    const bool counting = since_counted >= 0 && since_counted <= 8;
+    const bool deep = real_at(rdram, player + 0x18) < real_at(rdram, player + 0x118) - 55.0f;
+    const bool a_while = now_timer - air_counted_since.load() >= 30;
+    underwater = counting && (deep || a_while) && !surface_swimming_animation(animation) && !on_foot.load();
+    static const bool swim_debug = std::getenv("CONKER_SWIM_DEBUG") != nullptr; // testing: when it changes
+    static bool was_underwater = false;
+    if (swim_debug && underwater.load() != was_underwater) {
+        was_underwater = underwater.load();
+        std::printf("[swim] %.2fs %s: anim %02X y %.0f water %.0f air %u\n", conker::testing::game_seconds(), was_underwater ? "underwater" : "not underwater",
+            animation, real_at(rdram, player + 0x18), real_at(rdram, player + 0x118), (unsigned)air_used.load());
+    }
 }
 
 // Longer Breath: func_1504B0FC adds the frame's step (D_800BE9E4) to Conker's time underwater
@@ -482,8 +535,17 @@ static void update_on_foot(uint8_t* rdram) {
 // is divided here, with the remainder carried over, so all of it comes later.
 extern "C" void conker_longer_breath(uint8_t* rdram, recomp_context* ctx) {
     constexpr int32_t player = (int32_t)0x800CC2D0;
+    if ((int32_t)ctx->r16 != player) {
+        return;
+    }
+    const int32_t timer = MEM_W(0, (gpr)(int32_t)0x800E0A90); // he's underwater (Invert Swimming)
+    const int32_t gap = timer - air_counted_at.load();
+    if (gap < 0 || gap > 8) {
+        air_counted_since = timer;
+    }
+    air_counted_at = timer;
     const int mode = conker::qol::longer_breath();
-    if (mode == 0 || (int32_t)ctx->r16 != player) {
+    if (mode == 0) {
         return;
     }
     static double carried = 0.0;
@@ -577,6 +639,16 @@ bool conker::qol::cutscene_playing() {
 extern "C" void conker_motion_blur(uint8_t* rdram, recomp_context* ctx) {
     if (conker::qol::reduce_motion()) {
         ctx->r3 = 0;
+    }
+}
+
+// Reduce Motion Effects: the camera's sway. func_1512D070 sways the camera's look-at point slowly from
+// side to side (Conker drunk: the camera's +0x5F0 has 0x8 set; also a couple of other camera modes),
+// easing its strength (+0x7DC) toward the one it picks, $f2 here (0 when there's none). Taken as 0,
+// the sway eases out and stays out; the game's own state is left as it is.
+extern "C" void conker_camera_sway(uint8_t* rdram, recomp_context* ctx) {
+    if (conker::qol::reduce_motion()) {
+        ctx->f2.u32l = 0;
     }
 }
 

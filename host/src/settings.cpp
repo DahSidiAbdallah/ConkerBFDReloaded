@@ -383,8 +383,8 @@ namespace {
             });
         // Comfort.
         add_bool("reduce_motion", "Reduce Motion Effects",
-            "Turns off the <recomp-color primary>motion blur</recomp-color> (the ghostly trails while Conker is drunk at the start of the game), "
-            "which can cause motion sickness.", false, &reduce_motion_on);
+            "Turns off the <recomp-color primary>motion blur</recomp-color> (the ghostly trails while Conker is drunk) and the "
+            "<recomp-color primary>camera's sway</recomp-color> (it rocks from side to side while he's drunk), which can cause motion sickness.", false, &reduce_motion_on);
         add_bool("pause_unfocused", "Pause When Unfocused",
             "<recomp-color primary>Pauses</recomp-color> the game while you're in another window (after alt-tab or a click elsewhere) and carries "
             "on when you come back.", true, &pause_unfocused_on);

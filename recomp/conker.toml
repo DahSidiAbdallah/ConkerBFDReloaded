@@ -732,6 +732,13 @@ func = "func_151D6778"
 before_vram = 0x151D6798
 text = "{ extern void conker_motion_blur(uint8_t*, recomp_context*); conker_motion_blur(rdram, ctx); }"
 
+# Reduce Motion Effects (host/src/qol.cpp): the camera sway's strength ($f2) in func_1512D070, where
+# the ways of picking it meet (drunk: the camera sways from side to side).
+[[patches.hook]]
+func = "func_1512D070"
+before_vram = 0x1512D148
+text = "{ extern void conker_camera_sway(uint8_t*, recomp_context*); conker_camera_sway(rdram, ctx); }"
+
 # Widescreen: light glows (func_151408A4) are dropped outside the camera's 4:3 picture; its left and
 # right bounds move out to the window's (host/src/widescreen.cpp).
 [[patches.hook]]
@@ -781,3 +788,9 @@ text = "{ extern void conker_longer_breath(uint8_t*, recomp_context*); conker_lo
 func = "func_150911F4"
 before_vram = 0x1509122C
 text = "{ extern void conker_air_face_drawn(uint8_t*, recomp_context*); conker_air_face_drawn(rdram, ctx); }"
+
+# Testing (host/src/testing.cpp, CONKER_TEST_CAMERA_FLAGS): the camera's flags as its sway starts.
+[[patches.hook]]
+func = "func_1512D070"
+before_vram = 0x1512D070
+text = "{ extern void conker_test_camera_flags(uint8_t*, recomp_context*); conker_test_camera_flags(rdram, ctx); }"
