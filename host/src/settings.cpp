@@ -30,6 +30,7 @@ namespace {
     // Free Camera (General tab): Off, the right stick, or the right stick and the mouse.
     enum class FreeCamera : uint32_t { Off, Stick, StickAndMouse };
     std::atomic<uint32_t> free_camera_mode{ (uint32_t)FreeCamera::StickAndMouse };
+    std::atomic<uint32_t> button_prompts_mode{ (uint32_t)conker::ButtonPrompts::Automatic };
     // Set when the settings files still have the Free Camera as it was before it moved to the General
     // tab (an on/off switch on the Conker tab, and the mouse's own switch): carried over once loaded.
     std::optional<FreeCamera> free_camera_carried;
@@ -134,9 +135,9 @@ namespace {
 
     // What Classic and Modern set. Classic: the game as it looked, ran and played on the N64 (4:3,
     // 30 fps, native resolution, no smoothing of edges, N64 texture filtering, the full intro, the
-    // game's own camera, no mouse). Modern: widescreen, the display's frame rate, the window's
-    // resolution, 4x anti-aliasing, smooth textures, 2D and shading, straight to the save menu, the free
-    // camera with auto-follow, and the mouse turning the camera and aiming directly. Settings that
+    // game's own camera and field of view, no mouse, no air meter). Modern: widescreen, the display's
+    // frame rate, the window's resolution, 4x anti-aliasing, smooth textures, 2D and shading, straight to
+    // the save menu, the free camera, the mouse turning the camera and aiming directly, and the air meter. Settings that
     // are about the player's hands or controller (invert, turning speed, rumble, gyro) are left alone.
     enum class Tab { Graphics, Conker, Accessibility, General };
     struct PresetSetting {
@@ -168,6 +169,12 @@ namespace {
                 { Tab::Conker, "skip_any_cutscene", V{ false }, V{ true } },
                 { Tab::General, recompui::config::general::options::mouse_sensitivity, V{ 0.0 }, V{ 50.0 } },
                 { Tab::General, "look_mouse_response", e(0u /* Smooth */), e(1u /* Direct */) },
+                // The original's air face only, or a bar under it too.
+                { Tab::Accessibility, "air_meter", V{ false }, V{ true } },
+                // The original's view; Modern leaves it to the player.
+                { Tab::General, "camera_field_of_view_degrees", V{ 50.0 }, std::nullopt },
+                // The N64 buttons, or (as modern games do) the keys and mouse buttons while you play with them.
+                { Tab::General, "button_prompts", e(conker::ButtonPrompts::Controller), e(conker::ButtonPrompts::Automatic) },
             };
             return list;
         }();
@@ -249,10 +256,10 @@ namespace {
             "experience", "Experience",
             "A quick way to set up the whole game."
             "<br /><br /><recomp-color primary>Classic</recomp-color>: as it was on the N64 (4:3, 30 frames per second, the original resolution, the "
-            "full intro and the game's own camera)."
+            "full intro, and the game's own camera and field of view)."
             "<br /><br /><recomp-color primary>Modern</recomp-color>: the recommended settings (widescreen, your display's frame rate, full resolution, "
             "anti-aliasing, smooth textures and lighting, straight to the save menu, the free camera, the aiming "
-            "crosshair and mouse control)."
+            "crosshair, mouse control, the air meter, and button prompts that follow your keyboard, mouse or controller)."
             "<br /><br /><recomp-color primary>Custom</recomp-color>: set everything yourself.<br /><br />While Classic or Modern is picked, the settings it "
             "decides are greyed out. Invert, turning speed, rumble and gyro always stay as you set them.",
             { { Experience::Classic, "Classic", "Classic" }, { Experience::Modern, "Modern", "Modern" },
@@ -473,6 +480,19 @@ void conker::init_settings() {
     recomp::config::Config& general_config = recompui::config::create_general_tab(general);
     conker::rumble::add_options(general_config);
     add_free_camera_option(general_config);
+    general_config.add_enum_option("button_prompts", "Button Prompts",
+        "What the <recomp-color primary>button pictures</recomp-color> in the speech bubbles show."
+        "<br /><br /><recomp-color primary>Automatic</recomp-color>: the keys and mouse buttons you've bound while you play with the keyboard "
+        "and mouse, the N64 buttons while you use a controller."
+        "<br /><recomp-color primary>Controller</recomp-color>: always the N64 buttons, as in the original."
+        "<br /><recomp-color primary>Keyboard and Mouse</recomp-color>: always your keys and mouse buttons.",
+        { { conker::ButtonPrompts::Automatic, "Automatic", "Automatic" }, { conker::ButtonPrompts::Controller, "Controller", "Controller" },
+          { conker::ButtonPrompts::Keyboard, "Keyboard", "Keyboard and Mouse" } },
+        conker::ButtonPrompts::Automatic);
+    general_config.add_option_change_callback("button_prompts",
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+            button_prompts_mode = std::get<uint32_t>(cur);
+        });
     conker::look_aim::add_options(general_config);
     recompui::config::create_graphics_tab();
     add_extra_graphics_options();
@@ -553,3 +573,7 @@ int conker::qol::longer_breath() { return longer_breath_mode; }
 bool conker::qol::air_meter() { return air_meter_on; }
 int conker::qol::walk_button() { return walk_button_mode; }
 bool conker::qol::longer_spin() { return longer_spin_on; }
+
+conker::ButtonPrompts conker::button_prompts() {
+    return (conker::ButtonPrompts)button_prompts_mode.load();
+}

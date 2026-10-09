@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <span>
 #include <string>
 #include <vector>
@@ -83,6 +84,13 @@ namespace conker {
     bool skip_intro();
     bool free_camera_enabled();
     bool free_camera_mouse(); // Free Camera: Right Stick and Mouse
+
+    // Button Prompts (General tab; key_prompts.cpp): which the speech bubbles' button pictures show.
+    enum class ButtonPrompts : uint32_t { Automatic, Controller, Keyboard };
+    ButtonPrompts button_prompts();
+    void key_prompts_init();   // once SDL is up
+    void key_prompts_update(); // now and then, from the UI thread
+    void key_prompts_write_pictures(const std::filesystem::path& dir); // testing
     // free_camera.cpp: the right stick for the Free Camera (x right, y up, past the dead zone).
     void free_camera_stick(float* x, float* y);
     // scene_fixes.cpp: Skip Intro's steps.

@@ -794,3 +794,23 @@ text = "{ extern void conker_air_face_drawn(uint8_t*, recomp_context*); conker_a
 func = "func_1512D070"
 before_vram = 0x1512D070
 text = "{ extern void conker_test_camera_flags(uint8_t*, recomp_context*); conker_test_camera_flags(rdram, ctx); }"
+
+# Keyboard and mouse button prompts (host/src/key_prompts.cpp): a speech bubble's button picture,
+# about to have its sprite set up (func_15094F70).
+[[patches.hook]]
+func = "func_150417AC"
+before_vram = 0x150420E4
+text = "{ extern void conker_prompt_glyph(uint8_t*, recomp_context*); conker_prompt_glyph(rdram, ctx); }"
+
+# Keyboard and mouse button prompts (host/src/key_prompts.cpp): its sprite just set up.
+[[patches.hook]]
+func = "func_150417AC"
+before_vram = 0x150420EC
+text = "{ extern void conker_prompt_glyph_set_up(uint8_t*, recomp_context*); conker_prompt_glyph_set_up(rdram, ctx); }"
+
+
+# Aiming Crosshair (host/src/crosshair.cpp): a speech or thought bubble's text is drawn (func_150417AC).
+[[patches.hook]]
+func = "func_150417AC"
+before_vram = 0x150417AC
+text = "{ extern void conker_bubble_text_drawn(uint8_t*, recomp_context*); conker_bubble_text_drawn(rdram, ctx); }"

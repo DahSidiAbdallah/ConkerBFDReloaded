@@ -19,7 +19,7 @@ endif()
 # The version: shown in the launcher and in the exe's Properties. A suffix (e.g. "-beta") marks test builds.
 set(CONKER_VERSION_MAJOR 1)
 set(CONKER_VERSION_MINOR 3)
-set(CONKER_VERSION_PATCH 3)
+set(CONKER_VERSION_PATCH 4)
 set(CONKER_VERSION_SUFFIX "")
 set(CONKER_VERSION_STRING "${CONKER_VERSION_MAJOR}.${CONKER_VERSION_MINOR}.${CONKER_VERSION_PATCH}${CONKER_VERSION_SUFFIX}")
 configure_file(src/version.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/version.h" @ONLY)
@@ -70,6 +70,7 @@ add_executable(ConkerBFDReloaded
     src/qol.cpp
     src/cash_hud.cpp
     src/ledge_grab.cpp
+    src/key_prompts.cpp
     src/look_aim.cpp
     src/rumble.cpp
     src/interpolation.cpp
@@ -90,7 +91,8 @@ else()
 endif()
 target_include_directories(ConkerBFDReloaded PRIVATE "${RUNTIME_DIR}/N64Recomp/include" "${RECOMP_OUT}"
     "${CMAKE_CURRENT_BINARY_DIR}/generated"
-    "${RUNTIME_DIR}/thirdparty/xxHash")
+    "${RUNTIME_DIR}/thirdparty/xxHash"
+    "${RT64_DIR}/src/contrib/stb")
 target_link_libraries(ConkerBFDReloaded PRIVATE RecompiledFuncs librecomp ultramodern)
 
 set(RT64_STATIC ON CACHE BOOL "" FORCE)

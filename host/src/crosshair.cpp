@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdlib>
 
+#include "recomp.h"
 #include "ultramodern/ultramodern.hpp"
 #include "recompui/recompui.h"
 #include "recompinput/players.h"
@@ -37,6 +38,7 @@ namespace {
     constexpr auto still_aiming = std::chrono::milliseconds(100);
 
     std::atomic<int64_t> aimed_at{0}; // when the aiming mode last ran, unzoomed (clock ticks)
+    std::atomic<int64_t> bubble_at{0}; // when a speech or thought bubble's text was last drawn
     std::atomic<bool> ui_ready = false; // recompui's UI exists (made on the render thread as RT64 starts)
     bool created = false;
     recompui::ContextId context = recompui::ContextId::null();
@@ -122,11 +124,13 @@ void conker::crosshair::update() {
     }
     const auto last = clock::time_point(clock::duration(aimed_at.load()));
     // Single player only: in split screen the middle of the window isn't player 1's view.
-    // Not while a cutscene or a talk plays: the game uses the look mode for some (Conker reading
-    // "What To Do"), though nothing can be thrown then.
+    // Not while a cutscene plays, nor while a speech or thought bubble is up: the game uses the look
+    // mode for some of those (Conker reading "What To Do", whose pages wait for a button and aren't
+    // cutscenes), though nothing can be thrown then.
+    const bool bubble = clock::now() - clock::time_point(clock::duration(bubble_at.load())) < std::chrono::milliseconds(250);
     const bool wanted = ui_ready && conker::crosshair::enabled() && ultramodern::is_game_started() &&
         recompinput::players::is_single_player_mode() && clock::now() - last < still_aiming &&
-        !conker::qol::cutscene_playing();
+        !conker::qol::cutscene_playing() && !bubble;
     if (!wanted) {
         if (created && recompui::is_context_shown(context)) {
             recompui::hide_context(context);
@@ -146,4 +150,9 @@ void conker::crosshair::update() {
         context.close();
         shown_raise = raise;
     }
+}
+
+// func_150417AC starting: a speech or thought bubble's text is being drawn this frame.
+extern "C" void conker_bubble_text_drawn(uint8_t*, recomp_context*) {
+    bubble_at = clock::now().time_since_epoch().count();
 }

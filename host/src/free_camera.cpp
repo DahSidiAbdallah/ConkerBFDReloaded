@@ -105,6 +105,16 @@ namespace {
     // there's room. Anywhere else the player's angle is kept.
     constexpr float squeeze_lift_step = 10.0f * degrees_to_radians;
     constexpr float lift_ease_seconds = 0.6f;
+    // Before rising, it turns aside (a wall at the player's angle, often with rock above too, as at
+    // the bend at the top of the slope outside the barn, where rising leaves it just above Conker's
+    // head): by side_step tries up to side_most each way (on the side it last turned to first), to
+    // the nearest angle with side_room of room; quickly (side_in_seconds), as there's nothing to see
+    // where it was, and back to the player's angle over side_out_seconds once that has room.
+    constexpr float side_step = 15.0f * degrees_to_radians;
+    constexpr float side_most = 165.0f * degrees_to_radians;
+    constexpr float side_room = 120.0f;
+    constexpr float side_in_seconds = 0.12f;
+    constexpr float side_out_seconds = 0.6f;
 
     // Scroll wheel notches since the view last read them (SDL event watch: the
     // frontend's own event loop consumes the events).
@@ -134,6 +144,7 @@ namespace {
         float shown_distance = 0.0f;    // the eye's eased distance from the look-at point (0: none yet)
         float reach = 0.0f;             // the orbit's eased distance (0: none yet)
         float lift = 0.0f;              // radians the eye is raised out of a squeeze
+        float side = 0.0f;              // radians the eye is turned aside from the player's angle (walls)
         double last_view = 0.0;         // game seconds at the last view
     } orbit;
     bool was_normal_camera = false; // conker::normal_camera (Camera: Field of View)
@@ -401,41 +412,70 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     const float tilt_room = std::min(closest_tilted, orbit.reach);
     orbit.pitch = std::max(orbit.pitch, -std::asin(std::clamp((cy - lowest) / tilt_room, 0.0f, 1.0f)));
     const float look[3] = { cx, cy, cz };
-    auto direction = [&](float lift, float out[3]) {
+    auto direction = [&](float lift, float out[3], float side = 0.0f) {
         const float pitch = std::min(orbit.pitch + lift, max_pitch);
-        out[0] = std::cos(pitch) * std::cos(orbit.yaw);
+        out[0] = std::cos(pitch) * std::cos(orbit.yaw + side);
         out[1] = std::sin(pitch);
-        out[2] = std::cos(pitch) * std::sin(orbit.yaw);
+        out[2] = std::cos(pitch) * std::sin(orbit.yaw + side);
     };
     const auto timing_start = std::chrono::steady_clock::now(); // (CONKER_CAM_TRACE)
     const float enough = std::min(min_reach, orbit.reach);
-    // The lift a squeeze needs: none if the player's angle has room.
-    float needed_lift = 0.0f;
+    // The player's angle: as far out as there's room.
     float dir[3];
     direction(0.0f, dir);
     float distance = ball_room(rdram, ctx, camera, look, dir, orbit.reach);
+    // No room there (the eye would be inside Conker): first turn aside, to the nearest angle with
+    // plenty of room (on the side it last turned to first); where there's none (walls all around),
+    // rise instead, as the game's camera does, looking down at him.
+    float needed_side = 0.0f, needed_lift = 0.0f;
     if (distance < enough) {
-        for (float lift = squeeze_lift_step; orbit.pitch + lift - squeeze_lift_step < max_pitch; lift += squeeze_lift_step) {
-            float lifted[3];
-            direction(lift, lifted);
-            if (ball_room(rdram, ctx, camera, look, lifted, orbit.reach) >= enough) {
-                needed_lift = lift;
-                break;
+        const float want = std::min(side_room, orbit.reach);
+        const float first = orbit.side < 0.0f ? -1.0f : 1.0f;
+        for (float turn = side_step; turn <= side_most && needed_side == 0.0f; turn += side_step) {
+            for (float sign : { first, -first }) {
+                float aside[3];
+                direction(0.0f, aside, sign * turn);
+                if (ball_room(rdram, ctx, camera, look, aside, orbit.reach) >= want) {
+                    needed_side = sign * turn;
+                    break;
+                }
+            }
+        }
+        if (needed_side == 0.0f) {
+            for (float lift = squeeze_lift_step; orbit.pitch + lift - squeeze_lift_step < max_pitch; lift += squeeze_lift_step) {
+                float lifted[3];
+                direction(lift, lifted);
+                if (ball_room(rdram, ctx, camera, look, lifted, orbit.reach) >= enough) {
+                    needed_lift = lift;
+                    break;
+                }
             }
         }
     }
-    // Up at once, back down eased; easing down, an angle on the way without room goes back up.
+    // Up at once, back down eased.
     if (needed_lift >= orbit.lift) {
         orbit.lift = needed_lift;
     } else {
         orbit.lift += (needed_lift - orbit.lift) * (1.0f - std::exp(-seconds / lift_ease_seconds));
     }
-    if (orbit.lift > 0.0f) {
-        direction(orbit.lift, dir);
+    // Aside quickly, back eased; to the other side in one go (not back through Conker).
+    if ((needed_side > 0.0f && orbit.side < 0.0f) || (needed_side < 0.0f && orbit.side > 0.0f)) {
+        orbit.side = needed_side;
+    } else {
+        const bool back = std::abs(needed_side) < std::abs(orbit.side);
+        orbit.side += (needed_side - orbit.side) * (1.0f - std::exp(-seconds / (back ? side_out_seconds : side_in_seconds)));
+        if (std::abs(orbit.side - needed_side) < 0.2f * degrees_to_radians) {
+            orbit.side = needed_side;
+        }
+    }
+    if (orbit.lift > 0.0f || orbit.side != 0.0f) {
+        direction(orbit.lift, dir, orbit.side);
         distance = ball_room(rdram, ctx, camera, look, dir, orbit.reach);
-        if (distance < enough && orbit.lift != needed_lift) {
+        // Easing back, an angle on the way without room: straight to the one wanted.
+        if (distance < enough && (orbit.lift != needed_lift || orbit.side != needed_side)) {
             orbit.lift = needed_lift;
-            direction(orbit.lift, dir);
+            orbit.side = needed_side;
+            direction(orbit.lift, dir, orbit.side);
             distance = ball_room(rdram, ctx, camera, look, dir, orbit.reach);
         }
     }
@@ -446,7 +486,7 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     for (int i = 0; i < 3; i++) target[i] = look[i] + dir[i] * distance;
     static const bool trace_sight = std::getenv("CONKER_CAM_TRACE") != nullptr;
     if (trace_sight) {
-        std::printf("[sight] t=%.3f reach %.1f distance %.1f pitch %.1f lift %.1f us %lld\n", now, orbit.reach, distance, orbit.pitch * 57.2958f, orbit.lift * 57.2958f,
+        std::printf("[sight] t=%.3f reach %.1f distance %.1f pitch %.1f lift %.1f side %.1f us %lld\n", now, orbit.reach, distance, orbit.pitch * 57.2958f, orbit.lift * 57.2958f, orbit.side * 57.2958f,
             (long long)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - timing_start).count());
     }
     // Placed directly: the game's collision (which would slide the camera from last frame's eye,
@@ -516,6 +556,7 @@ extern "C" void conker_mouse_camera(uint8_t* rdram, recomp_context* ctx) {
     if (!orbit.engaged) {
         orbit.reach = 0.0f;
         orbit.lift = 0.0f;
+        orbit.side = 0.0f;
     }
 }
 

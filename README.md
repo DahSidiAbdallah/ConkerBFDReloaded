@@ -49,11 +49,13 @@ with `./ConkerBFDReloaded --rom /path/to/conker.z64`. It's remembered after that
 ## Classic or Modern
 
 **Classic** is the N64 experience: the original 4:3 picture, the original 30 fps, the game's own
-camera, the original lighting and shading. You get the higher resolution and nothing else changes.
+camera and field of view, the original lighting and shading. You get the higher resolution and
+nothing else changes.
 
 **Modern** turns on widescreen, the smooth frame rate, sharper 2D graphics, smooth shading, the
 free camera, the aiming crosshair, the autosave icon, hold-to-skip cutscenes,
-pausing when you alt-tab, Skip Intro and direct mouse aiming.
+pausing when you alt-tab, Skip Intro, direct mouse aiming, the air meter, and button prompts that
+show your keys and mouse buttons when you play with them.
 
 While Classic or Modern is picked, the settings it decides are greyed out. Pick **Custom** to
 change any of them yourself.
@@ -88,7 +90,8 @@ change any of them yourself.
   ones the original never lets you skip. A ring fills while you hold, so you can't skip by accident.
 - **Free camera.** Turn the camera with the right stick, or the mouse too (Free Camera on the
   General tab), and it stays where you put it. It doesn't go through walls, posts or the floor:
-  where there's no room it comes in toward Conker, and it glides back out when there's space.
+  where there's no room it comes in toward Conker (or, in a tight bend, turns aside to where there
+  is), and it glides back out when there's space.
   Tilted down, it settles just above the ground.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
   walk instead of run with L, catch the edge when you walk off something high or come up short on a
@@ -103,6 +106,11 @@ change any of them yourself.
   which one you're playing (Original, Uncensored or French) and switches back any time.
 - **Plays in French.** Works with the French translation by Corrigo and Djipi (see
   [Playing in French](#playing-in-french) below).
+- **Keyboard and mouse button prompts.** Playing with the keyboard and mouse, the button pictures in
+  the speech bubbles show the keys and mouse buttons you've actually bound (SPACE, a mouse with its
+  button lit up, WASD for the stick...), sharp at any resolution, and they follow your bindings if
+  you change them. With a controller you see the N64 buttons. Button Prompts on the General tab:
+  Automatic (follows what you last used), Controller or Keyboard and Mouse.
 - **Texture pack and mod support.** RT64 texture packs (`.rtz`) and N64Recomp mods (`.nrm`) go in
   through the Mods menu and can be switched on and off while you play.
 
@@ -128,6 +136,8 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Invert Swimming while carrying something.** It works while Conker carries something
   underwater (like the cogs), and only underwater, not on the surface, but I haven't tested it with
   a cog in his hands yet.
+- **Keyboard and mouse button prompts.** Tested in speech bubbles. The pause menu's stick picture
+  isn't converted yet.
 - **The French translation.** Tested with a new game (the opening, the bar, the speech bubbles,
   the menus and the pause screen), not through the whole game.
 - **Rumble, gyro aiming and multiplayer.** These come from CBFD-Recompiled (see below) and are
@@ -202,7 +212,7 @@ posters and newspapers inside the levels are still in English for now.
 
 ## Coming next
 
-Ideas and requests (keyboard and mouse button prompts and more) are on the
+Ideas and requests are on the
 [Discussions](../../discussions) board. Upvote the ones you want or add your own.
 
 ## Building it yourself

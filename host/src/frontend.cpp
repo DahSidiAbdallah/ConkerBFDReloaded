@@ -180,6 +180,7 @@ namespace {
         conker::pad_mappings::fix_all();
         NFD_Init(); // file dialogs (Load ROM, mods)
         conker_mouse_camera_init(); // the Free Camera's scroll wheel zoom (free_camera.cpp)
+        conker::key_prompts_init(); // Button Prompts: which device is in use (key_prompts.cpp)
         conker::qol::init(); // Pause When Unfocused watches the window's focus
         return nullptr;
     }

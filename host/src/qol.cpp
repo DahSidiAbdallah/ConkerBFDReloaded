@@ -395,6 +395,17 @@ void conker::qol::update() {
     const clock::time_point now = clock::now();
     if (now - last_check >= check_every) {
         last_check = now;
+        // Button Prompts: the key pictures follow the bindings (key_prompts.cpp).
+        static int prompt_checks = 0;
+        if (prompt_checks++ % 4 == 0) {
+            conker::key_prompts_update();
+            static const char* pictures = std::getenv("CONKER_PROMPT_PICTURES"); // testing: the pictures as files
+            static bool written = false;
+            if (pictures != nullptr && !written) {
+                written = true;
+                conker::key_prompts_write_pictures(std::filesystem::u8path(pictures));
+            }
+        }
         std::filesystem::file_time_type t{};
         if (newest_save(t)) {
             if (have_last_save && t != last_save && ultramodern::is_game_started()) {

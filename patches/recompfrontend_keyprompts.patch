@@ -1,0 +1,24 @@
+--- a/recompui/src/renderer/rt64_render_context.cpp
++++ b/recompui/src/renderer/rt64_render_context.cpp
+@@ -48,6 +48,10 @@
+ 
+ static moodycamel::ConcurrentQueue<TexturePackAction> texture_pack_action_queue;
+ 
++// Conker: a texture folder the game makes itself (the keyboard and mouse button prompts), loaded with
++// the texture packs; empty when there's none.
++extern "C" const char *conker_extra_texture_directory();
++
+ unsigned int MI_INTR_REG = 0;
+ 
+ unsigned int DPC_START_REG = 0;
+@@ -486,6 +490,10 @@
+         for (const std::string &mod_id : sorted_texture_packs) {
+             replacement_directories.emplace_back(RT64::ReplacementDirectory(recomp::mods::get_mod_filename(mod_id)));
+         }
++        const char *extra_directory = conker_extra_texture_directory();
++        if (extra_directory != nullptr && extra_directory[0] != '\0' && std::filesystem::is_directory(std::filesystem::u8path(extra_directory))) {
++            replacement_directories.emplace(replacement_directories.begin(), RT64::ReplacementDirectory(std::filesystem::u8path(extra_directory)));
++        }
+ 
+         if (!replacement_directories.empty()) {
+             app->textureCache->loadReplacementDirectories(replacement_directories);
