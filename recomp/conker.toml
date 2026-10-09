@@ -814,3 +814,9 @@ text = "{ extern void conker_prompt_glyph_set_up(uint8_t*, recomp_context*); con
 func = "func_150417AC"
 before_vram = 0x150417AC
 text = "{ extern void conker_bubble_text_drawn(uint8_t*, recomp_context*); conker_bubble_text_drawn(rdram, ctx); }"
+
+# Keyboard and mouse button prompts (host/src/key_prompts.cpp): the pause and save menus' stick.
+[[patches.hook]]
+func = "func_1510D0EC"
+before_vram = 0x1510D360
+text = "{ extern void conker_picture_looked_up(uint8_t*, recomp_context*); conker_picture_looked_up(rdram, ctx); }"

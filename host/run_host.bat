@@ -16,6 +16,7 @@ if exist C:\ConkerRecompWin\cam_nozoom.flag set CONKER_CAM_NOZOOM=1
 if exist C:\ConkerRecompWin\grab_debug.flag set CONKER_GRAB_DEBUG=1
 if exist C:\ConkerRecompWin\swim_debug.flag set CONKER_SWIM_DEBUG=1
 if exist C:\ConkerRecompWin\prompt_debug.flag set CONKER_PROMPT_DEBUG=1
+if exist C:\ConkerRecompWin\track.flag set CONKER_TEST_TRACK=1
 if exist C:\ConkerRecompWin\prompt_pictures.flag set CONKER_PROMPT_PICTURES=C:\ConkerRecompWin\snaps\prompt_pictures
 if exist C:\ConkerRecompWin\test_warp.txt set /p CONKER_TEST_WARP=<C:\ConkerRecompWin\test_warp.txt
 if exist C:\ConkerRecompWin\test_place.txt set /p CONKER_TEST_PLACE=<C:\ConkerRecompWin\test_place.txt

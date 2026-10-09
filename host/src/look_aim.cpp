@@ -397,10 +397,21 @@ extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
         return;
     }
     // Aiming Crosshair (crosshair.cpp): the look mode, which the game also puts Conker in to throw
-    // (the knives in the barn); only then, not while the player holds R to look around.
+    // (the knives in the barn); only then, not while the player holds R to look around. The look mode
+    // also runs while the camera stays well back from Conker (hypnotising the raptor in Uga Buga:
+    // about 450 away; looking or aiming, it's just over his shoulder, about 90): no dot then.
     {
         const gpr view = (gpr)(int32_t)((uint32_t)MEM_W(0, (gpr)(int32_t)0x800BE628) + MEM_BU(0x23D, ctx->r16) * 0x180);
-        conker::crosshair::look_mode(read_float(rdram, view, 0x78)); // the vertical field of view in use
+        gpr camera = (gpr)(int32_t)MEM_W(0, (gpr)(int32_t)0x800DBFF0);
+        if (((uint32_t)camera & 0xFF000000u) != 0x80000000u) {
+            camera = 0;
+        }
+        constexpr gpr player = (gpr)(int32_t)0x800CC2D0;
+        const float dx = camera ? read_float(rdram, camera, 0x2F8) - read_float(rdram, player, 0x14) : 1e9f;
+        const float dz = camera ? read_float(rdram, camera, 0x300) - read_float(rdram, player, 0x1C) : 1e9f;
+        if (dx * dx + dz * dz < 200.0f * 200.0f) {
+            conker::crosshair::look_mode(read_float(rdram, view, 0x78)); // the vertical field of view in use
+        }
     }
     float mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch;
     if (!take_movement(mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch)) {

@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cmath>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 
 #include "recomp.h"
@@ -69,7 +70,21 @@ namespace {
 }
 
 
+namespace {
+    // Testing (CONKER_TEST_TRACK): which way the dot was asked for, at most twice a second.
+    void track(const char* how) {
+        static const bool on = std::getenv("CONKER_TEST_TRACK") != nullptr;
+        static int64_t last = 0;
+        const int64_t now = clock::now().time_since_epoch().count();
+        if (on && now - last > (int64_t)std::chrono::duration_cast<clock::duration>(std::chrono::milliseconds(500)).count()) {
+            last = now;
+            std::printf("[crosshair] %s\n", how);
+        }
+    }
+}
+
 void conker::crosshair::aiming(bool zoomed) {
+    track(zoomed ? "aiming, zoomed" : "aiming");
     dot_raise = 0.0f;
     if (!zoomed) {
         aimed_at = clock::now().time_since_epoch().count();
@@ -92,6 +107,7 @@ void conker::crosshair::look_mode(float vertical_fov) {
         return;
     }
     if (now - look_alone_since.load() >= ticks(std::chrono::milliseconds(250))) {
+        track("look mode");
         aimed_at = now;
         // Throws from the look mode fly above the view's centre: measured on the knives in the barn
         // (the knife lands 0.41 of the way from the centre to the top, at the game's 50 degrees),

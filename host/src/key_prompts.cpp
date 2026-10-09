@@ -562,6 +562,16 @@ namespace {
     }
 
     std::atomic<bool> was_keyboard{ false };
+
+    // Whether to show the keys now; going back to the controller, the original pictures are put back.
+    bool follow_device(uint8_t* rdram) {
+        const bool keyboard = keyboard_prompts();
+        if (keyboard != was_keyboard.exchange(keyboard) && !keyboard) {
+            put_originals_back(rdram);
+        }
+        return keyboard;
+    }
+
     gpr glyph_list_start = 0;
     uint8_t glyph_character = 0;
 
@@ -623,10 +633,7 @@ extern "C" void conker_prompt_glyph(uint8_t* rdram, recomp_context* ctx) {
 // texture load (G_SETTIMG, 0xFD) says where the picture is, and the load block (G_LOADBLOCK, 0xF3) how
 // many pixels; on the keyboard, the marker goes there.
 extern "C" void conker_prompt_glyph_set_up(uint8_t* rdram, recomp_context* ctx) {
-    const bool keyboard = keyboard_prompts();
-    if (keyboard != was_keyboard.exchange(keyboard) && !keyboard) {
-        put_originals_back(rdram);
-    }
+    const bool keyboard = follow_device(rdram);
     if (glyph_list_start == 0 || glyph_character < 0xA8 || glyph_character > 0xB1) {
         glyph_list_start = 0;
         return;
@@ -646,4 +653,27 @@ extern "C" void conker_prompt_glyph_set_up(uint8_t* rdram, recomp_context* ctx) 
         return;
     }
     put_marker(rdram, texture, button);
+}
+
+// The control stick of the pause menu and the save menu (between PLAY and ERASE, QUIT and CONT...) is
+// another picture: numbers 0x7E7 to 0x7EC (its animation, tilting), drawn bigger. The game keeps its
+// pictures loaded by number (func_1510D0EC; at its end, 0x1510D360, $s0 the number and $v0 where it
+// is, 32 by 32, 32 bits a pixel, in a few places it reuses), and looks them up each time it draws one.
+// On the keyboard, the stick's marker goes there too, once the picture's in (it's loaded after the
+// look-up): it's then shown as the control stick's keys, as in the speech bubbles.
+extern "C" void conker_picture_looked_up(uint8_t* rdram, recomp_context* ctx) {
+    const uint32_t number = (uint32_t)ctx->r16, at = (uint32_t)ctx->r2;
+    // (Not loaded at all, it gives 0x80000000.)
+    if (number < 0x7E7 || number > 0x7EC || at < 0x80100000u || at >= 0x80800000u || !follow_device(rdram)) {
+        return;
+    }
+    // Loaded: pixels the stick covers in all of its pictures are there (row 16 column 16, row 20
+    // column 4, row 24 column 28, row 28 column 15).
+    const gpr address = (gpr)(int32_t)at;
+    for (int pixel : { 16 * 32 + 16, 20 * 32 + 4, 24 * 32 + 28, 28 * 32 + 15 }) {
+        if ((MEM_W(pixel * 4, address) & 0xFF) == 0) {
+            return;
+        }
+    }
+    put_marker(rdram, address, Stick);
 }

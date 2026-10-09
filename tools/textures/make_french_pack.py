@@ -48,8 +48,13 @@ def main():
     shutil.rmtree(out, ignore_errors=True)
     shutil.copytree(mixed, out)
     found = replaced = missing = 0
+    # Some of the colour-indexed pictures' entries have no palette fingerprint (0): those go by the
+    # picture's alone, whatever its palette.
+    any_palette = {}
+    for (crc, _), hashes in rt64.items():
+        any_palette.setdefault(crc, set()).update(hashes)
     for crc, palette, picture in entries(htc):
-        hashes = rt64.get((crc, palette))
+        hashes = rt64.get((crc, palette)) or (any_palette.get(crc) if palette == 0 else None)
         if not hashes:
             missing += 1
             continue

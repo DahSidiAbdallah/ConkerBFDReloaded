@@ -79,7 +79,7 @@ cp "$R/icons_work/conker_hd_icons.rtz" "$CFG/mods/" && echo "installed in $CFG/m
 # with permission) in place of the English ones. Not installed: it's for players of the French ROM.
 "$P" "$T/make_french_pack.py" $W/tools/packs/conker_fr.htc "$A/mixed" "$A/mixed_fr" $W/texdump* $W/scandump*
 cat "$T/HD_ICONS_FR_LICENSE.txt" "$T/HD_ICONS_LICENSE.txt" > "$A/license_fr.txt"
-"$P" "$T/make_pack.py" "$A/mixed_fr" "$R/icons_work/conker_hd_icons_fr.rtz" --id conker_hd_icons_fr --name "HD Icons (French)" --version 1.3.3 \
-  --description "The HD Icons pack with the French translation's menus, titles and logos, for the French ROM (use it instead of HD Icons). French graphics by Djipi (emulation64.fr), used with permission. HD textures by GameBeast92, modified, under CC BY 4.0. See LICENSE.txt in the pack." \
+"$P" "$T/make_pack.py" "$A/mixed_fr" "$R/icons_work/conker_hd_icons_fr.rtz" --id conker_hd_icons_fr --name "HD Icons (French)" --version 1.3.5 \
+  --description "The HD Icons pack with the French translation's menus, titles, logos and many of the signs inside the levels (not all yet), for the French ROM (use it instead of HD Icons). French graphics by Djipi (emulation64.fr), used with permission. HD textures by GameBeast92, modified, under CC BY 4.0. See LICENSE.txt in the pack." \
   --short "HD Icons, French menus" --author dahmedvall95 --author "Djipi (French graphics)" --author "GameBeast92 (4K texture artwork)" \
   --thumb "$R/icons_work/hd_icons_thumb.png" --license "$A/license_fr.txt"

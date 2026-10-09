@@ -108,9 +108,10 @@ change any of them yourself.
   [Playing in French](#playing-in-french) below).
 - **Keyboard and mouse button prompts.** Playing with the keyboard and mouse, the button pictures in
   the speech bubbles show the keys and mouse buttons you've actually bound (SPACE, a mouse with its
-  button lit up, WASD for the stick...), sharp at any resolution, and they follow your bindings if
-  you change them. With a controller you see the N64 buttons. Button Prompts on the General tab:
-  Automatic (follows what you last used), Controller or Keyboard and Mouse.
+  button lit up, WASD for the stick...), and so does the pause and save menus' stick. They're sharp
+  at any resolution and follow your bindings if you change them. With a controller you see the N64
+  buttons. Button Prompts on the General tab: Automatic (follows what you last used), Controller or
+  Keyboard and Mouse.
 - **Texture pack and mod support.** RT64 texture packs (`.rtz`) and N64Recomp mods (`.nrm`) go in
   through the Mods menu and can be switched on and off while you play.
 
@@ -136,10 +137,13 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Invert Swimming while carrying something.** It works while Conker carries something
   underwater (like the cogs), and only underwater, not on the surface, but I haven't tested it with
   a cog in his hands yet.
-- **Keyboard and mouse button prompts.** Tested in speech bubbles. The pause menu's stick picture
-  isn't converted yet.
+- **Keyboard and mouse button prompts.** Tested in speech bubbles and the pause and save menus.
 - **The French translation.** Tested with a new game (the opening, the bar, the speech bubbles,
   the menus and the pause screen), not through the whole game.
+- **The HD Icons (French) pack is incomplete.** It has 282 of the translation's 322 French pictures.
+  The menus (multiplayer ones too) are checked in the game; the signs inside the levels were only
+  spot-checked in a few places. About 40 posters, newspapers and signs that only show up at certain
+  moments of the story are still in English.
 - **Rumble, gyro aiming and multiplayer.** These come from CBFD-Recompiled (see below) and are
   included, but I haven't tested them myself yet.
 
@@ -186,8 +190,9 @@ translation works here, with their permission. Thank you to both of them!
    `ConkerBFDReloaded-HD-Icons-French` pack (`.rtz`) from the [Releases](../../releases) page the same
    way as the HD Icons pack, and use it **instead of** HD Icons (turn HD Icons off).
 
-The French pack covers the menus, chapter titles, the pause screen and the logos. Some signs,
-posters and newspapers inside the levels are still in English for now.
+The French pack covers the menus (multiplayer ones too), chapter titles, the pause screen, the logos
+and many of the signs inside the levels. A few posters, newspapers and signs that only show up at
+certain moments of the story are still in English for now.
 
 ## Known issues
 

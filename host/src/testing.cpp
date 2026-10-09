@@ -302,7 +302,30 @@ static void test_sink(uint8_t* rdram) {
     }
 }
 
+// Testing aid: CONKER_TEST_TRACK=1 logs Conker's position and animation, and the camera's eye and
+// mode, twice a second.
+static void test_track(uint8_t* rdram) {
+    static const bool track = std::getenv("CONKER_TEST_TRACK") != nullptr;
+    static double next = 0.0;
+    const double t = conker::testing::game_seconds();
+    if (!track || t < next) {
+        return;
+    }
+    next = t + 0.5;
+    constexpr int32_t player = (int32_t)0x800CC2D0;
+    const uint32_t camera = (uint32_t)MEM_W(0, (gpr)(int32_t)0x800DBFF0);
+    std::printf("[track] %.2fs at %.1f %.1f %.1f anim %04X", t, read_real(rdram, player + 0x14), read_real(rdram, player + 0x18),
+        read_real(rdram, player + 0x1C), (unsigned)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16));
+    if ((camera & 0xFF000000u) == 0x80000000u) {
+        const int32_t c = (int32_t)camera;
+        std::printf(" eye %.1f %.1f %.1f mode %d", read_real(rdram, c + 0x2F8), read_real(rdram, c + 0x2FC), read_real(rdram, c + 0x300),
+            (int)MEM_W(0x2C, (gpr)c));
+    }
+    std::printf("\n");
+}
+
 extern "C" void conker_probe_frame_end(uint8_t* rdram, recomp_context* ctx) {
+    test_track(rdram);
     test_travel(rdram, ctx);
     test_sink(rdram);
     conker_ledge_grab_watchdog(rdram, ctx);
