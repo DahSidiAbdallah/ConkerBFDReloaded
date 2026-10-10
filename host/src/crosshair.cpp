@@ -39,6 +39,7 @@ namespace {
     constexpr auto still_aiming = std::chrono::milliseconds(100);
 
     std::atomic<int64_t> aimed_at{0}; // when the aiming mode last ran, unzoomed (clock ticks)
+    std::atomic<uint32_t> current_room{0}; // the room the look mode last ran in
     std::atomic<int64_t> bubble_at{0}; // when a speech or thought bubble's text was last drawn
     std::atomic<bool> ui_ready = false; // recompui's UI exists (made on the render thread as RT64 starts)
     bool created = false;
@@ -91,7 +92,13 @@ void conker::crosshair::aiming(bool zoomed) {
     }
 }
 
-void conker::crosshair::look_mode(float vertical_fov) {
+void conker::crosshair::look_mode(float vertical_fov, uint8_t kind, uint32_t room) {
+    current_room = room;
+    {
+        char how[32];
+        std::snprintf(how, sizeof how, "look mode runs, kind %02X", kind);
+        track(how);
+    }
     // Only when the game put Conker in the look mode to throw (the knives in the barn), not when the
     // player looks around with R or L: not while either is held, nor for a moment after (the camera
     // swings back for a few frames once let go), and only once the look mode has run that way for a
@@ -107,14 +114,21 @@ void conker::crosshair::look_mode(float vertical_fov) {
         return;
     }
     if (now - look_alone_since.load() >= ticks(std::chrono::milliseconds(250))) {
-        track("look mode");
+        {
+            char how[32];
+            std::snprintf(how, sizeof how, "look mode, kind %02X", kind);
+            track(how);
+        }
         aimed_at = now;
-        // Throws from the look mode fly above the view's centre: measured on the knives in the barn
-        // (the knife lands 0.41 of the way from the centre to the top, at the game's 50 degrees),
-        // a fixed angle above it, so it's placed by the field of view in use.
+        // The knives' throws arc, flying above the view's centre: measured on the knives in the barn
+        // (the knife lands 0.41 of the way from the centre to the top, at the game's 50 degrees), a
+        // fixed angle above it, so it's placed by the field of view in use. Shots fly straight (the
+        // laser gun in the Count's attic lands at the centre): the dot stays there. The knives are the
+        // barn's (room 0x01); the look's kind is logged (CONKER_TEST_TRACK) to tell them apart by it.
         constexpr float throw_angle = 10.8f * 3.14159265f / 180.0f;
+        constexpr uint32_t barn_room = 0x01;
         float raise = 0.0f;
-        if (vertical_fov > 1.0f && vertical_fov < 170.0f) {
+        if (current_room.load() == barn_room && vertical_fov > 1.0f && vertical_fov < 170.0f) {
             raise = std::tan(throw_angle) / std::tan(vertical_fov * 0.5f * 3.14159265f / 180.0f);
         }
         dot_raise = std::clamp(raise, 0.0f, 0.9f);

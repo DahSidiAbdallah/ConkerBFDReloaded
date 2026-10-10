@@ -92,7 +92,8 @@ change any of them yourself.
   General tab), and it stays where you put it. It doesn't go through walls, posts or the floor:
   where there's no room it comes in toward Conker (or, in a tight bend, turns aside to where there
   is), and it glides back out when there's space.
-  Tilted down, it settles just above the ground.
+  Tilted down, it settles just above the ground. Walking up or down a slope, it tilts a little with
+  the slope so you can see where you're going.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
   walk instead of run with L, catch the edge when you walk off something high or come up short on a
   jump, swim up by pushing up
@@ -123,8 +124,12 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Smooth shading.** Lighting worked out per pixel instead of per corner, so torch light looks
   round and soft. I checked that it matches the original's brightness in the areas I tested,
   but not across the whole game.
-- **The crosshair with other weapons.** It's lined up and tested with the knives in the barn. With
-  other throwables and the magnum it sits in the middle of the screen, which I haven't checked yet.
+- **The crosshair with other weapons.** It's lined up and tested with the knives in the barn, where
+  it sits a little above the middle (the knives fly in an arc). Everywhere else it sits in the middle
+  of the screen, where straight shots like the laser gun in the Count's attic land, but I haven't
+  checked that in the game yet.
+- **The camera tilting on slopes.** Tested on gentle slopes and with made-up steep ones, not yet on
+  a really steep hill.
 - **Light glows near the screen edges.** In widescreen they used to vanish toward the sides; they
   should stay now, but I haven't seen one in-game yet.
 - **Frame rates above 60.** Smooth 60 fps is tested. I couldn't test 120 Hz and up because I don't
@@ -208,6 +213,9 @@ certain moments of the story are still in English for now.
   hack itself, not added by this project.
 - **Ledge Grab and corners.** Conker catches straight edges, not the very tip of a corner, the same
   as the game's own ledge grabs. Step off along an edge rather than over a corner.
+- **Ledge Grab and odd edges.** Sometimes Conker still catches an edge that isn't really a ledge,
+  like the slanted side of a staircase, and hangs there. If you see it, please
+  [open an issue](../../issues) saying where, with a screenshot if you can.
 - **Ledge Grab getting stuck (rare).** Once, near Bat's Tower's cogs, Conker got stuck climbing up
   and slid down the wall holding on to nothing. I couldn't make it happen again, so there's now a
   safety net: if it happens he lets go and falls instead. If you see it, please

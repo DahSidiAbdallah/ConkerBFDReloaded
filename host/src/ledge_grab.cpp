@@ -22,7 +22,9 @@
 // come down to its height and the search found nothing, that edge is handed to the game's hang
 // (func_1504CB98 reads the search's results at 0x15050ACC) the way the search would: the edge's
 // height, the point he hangs from, and the way he faces (back toward it). The game hangs him where
-// the point is, 79 below the top (its own grabs leave him about 14 units past the edge).
+// the point is, 79 below the top (its own grabs leave him about 14 units past the edge). Only over a
+// real drop (170 from the top down to the ground under him): stepping off a slope that steepens, the
+// search finds no edge either, and he used to hang against the slope with the ground just below.
 //
 // One catch per fall: once he has hung, letting go or dropping doesn't catch again until he's back
 // on the ground (otherwise letting go took several presses).
@@ -65,6 +67,9 @@ namespace {
     // (measured on a crate's edge); 6 more puts his hands at the edge within a few units, close
     // enough that climbing up (which carries him about 30 forward) lands him on top.
     constexpr float hang_from_last_ground = 6.0f;
+    // He hangs 79 below the top: only with at least this much from the top down to the ground under
+    // him, so his feet are well clear of it (a crate is about 270; a slope that steepens is far less).
+    constexpr float drop_under_hang = 170.0f;
 
     struct Fall {
         bool grounded_seen = false;
@@ -74,6 +79,7 @@ namespace {
         float first_air[2] = {};    // the first spot he was in the air
         uint16_t facing = 0;        // his facing as he stepped off
         bool caught = false;        // he has hung since he was last on the ground
+        bool nothing_to_hold = false; // the edge he walked off wasn't over a real drop (below)
     } fall;
 
     float real(uint8_t* rdram, int32_t address) {
@@ -161,6 +167,7 @@ extern "C" void conker_ledge_grab_mask(uint8_t* rdram, recomp_context* ctx) {
         fall.last_ground[1] = z;
         fall.first_air_seen = false;
         fall.caught = false;
+        fall.nothing_to_hold = false;
         fall.facing = (uint16_t)MEM_HU(0, (gpr)(player + 0x76));
         return;
     }
@@ -216,7 +223,7 @@ extern "C" void conker_ledge_grab_found(uint8_t* rdram, recomp_context* ctx) {
         std::printf("[grab] %.2fs check: edge %.1f / %.1f, y %.1f\n", conker::testing::game_seconds(),
             real(rdram, found_edge_a), real(rdram, found_edge_b), real(rdram, player + 0x18));
     }
-    if (!conker::qol::ledge_grab() || !fall.walked_off || fall.caught || !fall.first_air_seen) {
+    if (!conker::qol::ledge_grab() || !fall.walked_off || fall.caught || !fall.first_air_seen || fall.nothing_to_hold) {
         return;
     }
     if (real(rdram, found_edge_a) != none_found || real(rdram, found_edge_b) != none_found) {
@@ -234,6 +241,18 @@ extern "C" void conker_ledge_grab_found(uint8_t* rdram, recomp_context* ctx) {
     }
     dx /= step;
     dz /= step;
+    // Only where there's a real drop under him (above): stepping off a slope that steepens, he used to
+    // hang against it with the ground just under his feet.
+    {
+        const float room_below = top - real(rdram, player + 0x180);
+        if (debug) {
+            std::printf("[grab] edge he walked off: %.1f from its top down to the ground under him\n", room_below);
+        }
+        if (room_below < drop_under_hang) {
+            fall.nothing_to_hold = true;
+            return;
+        }
+    }
     // Facing back toward the edge: his facing as he stepped off, turned around. The game turns him to
     // his heading (+0x40, degrees) + the found angle + 90 degrees, in 256ths of a turn (the extra half
     // step keeps its rounding down from landing one short).

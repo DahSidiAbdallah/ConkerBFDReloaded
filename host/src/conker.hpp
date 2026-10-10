@@ -116,7 +116,7 @@ namespace conker {
         void aiming(bool zoomed);
         // look_aim.cpp, each frame of the look mode (player 1): shown unless the player holds R.
         // vertical_fov: the camera's vertical field of view in use, in degrees.
-        void look_mode(float vertical_fov);
+        void look_mode(float vertical_fov, uint8_t kind, uint32_t room);
         // frontend.cpp: player 1's buttons this frame (R held or not).
         void set_buttons(uint16_t buttons);
         // From the launcher's init (frontend.cpp): recompui's UI exists now.

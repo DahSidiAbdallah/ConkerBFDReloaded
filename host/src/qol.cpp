@@ -590,7 +590,9 @@ void conker::qol::apply_walk(uint16_t buttons, float* x, float* y) {
     if (l_held && conker::qol::cutscene_playing()) {
         walk_l_in_cutscene = true;
     }
-    if (mode == 2 && !l_held && walk_l_was_held && !walk_l_in_cutscene &&
+    // Only on foot (his own state: not holding a gun, swimming and so on, where L may be something
+    // else and the walk doesn't apply): a tap there used to switch it unseen until he was back on foot.
+    if (mode == 2 && !l_held && walk_l_was_held && !walk_l_in_cutscene && on_foot.load() &&
         !conker::qol::cutscene_playing() && seconds_since(walk_l_pressed) < walk_tap_seconds) {
         walk_toggled = !walk_toggled;
     }

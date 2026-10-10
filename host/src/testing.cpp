@@ -311,15 +311,16 @@ static void test_track(uint8_t* rdram) {
     if (!track || t < next) {
         return;
     }
-    next = t + 0.5;
+    static const double every = std::getenv("CONKER_TEST_TRACK_FAST") != nullptr ? 0.03 : 0.5;
+    next = t + every;
     constexpr int32_t player = (int32_t)0x800CC2D0;
     const uint32_t camera = (uint32_t)MEM_W(0, (gpr)(int32_t)0x800DBFF0);
     std::printf("[track] %.2fs at %.1f %.1f %.1f anim %04X", t, read_real(rdram, player + 0x14), read_real(rdram, player + 0x18),
         read_real(rdram, player + 0x1C), (unsigned)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16));
     if ((camera & 0xFF000000u) == 0x80000000u) {
         const int32_t c = (int32_t)camera;
-        std::printf(" eye %.1f %.1f %.1f mode %d", read_real(rdram, c + 0x2F8), read_real(rdram, c + 0x2FC), read_real(rdram, c + 0x300),
-            (int)MEM_W(0x2C, (gpr)c));
+        std::printf(" eye %.1f %.1f %.1f look %.1f %.1f %.1f mode %d", read_real(rdram, c + 0x2F8), read_real(rdram, c + 0x2FC), read_real(rdram, c + 0x300),
+            read_real(rdram, c + 0x2BC), read_real(rdram, c + 0x2C0), read_real(rdram, c + 0x2C4), (int)MEM_W(0x2C, (gpr)c));
     }
     std::printf("\n");
 }

@@ -410,7 +410,10 @@ extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
         const float dx = camera ? read_float(rdram, camera, 0x2F8) - read_float(rdram, player, 0x14) : 1e9f;
         const float dz = camera ? read_float(rdram, camera, 0x300) - read_float(rdram, player, 0x1C) : 1e9f;
         if (dx * dx + dz * dz < 200.0f * 200.0f) {
-            conker::crosshair::look_mode(read_float(rdram, view, 0x78)); // the vertical field of view in use
+            // The vertical field of view in use, and which kind of look it is (+0x23E, func_15120158 picks
+            // its settings by it): the knives' throws arc, other aims (the guns) fly straight.
+            conker::crosshair::look_mode(read_float(rdram, view, 0x78), (uint8_t)MEM_BU(0x23E, ctx->r16),
+                (uint32_t)MEM_W(0, (gpr)(int32_t)0x800BE9F0)); // and the room
         }
     }
     float mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch;

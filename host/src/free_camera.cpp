@@ -94,7 +94,18 @@ namespace {
     // up at him; there it stops tilting once it's come in to closest_tilted, with all of him in
     // view. Otherwise, standing near an edge, it went down past the edge and the ledge hid him.
     constexpr float above_feet = 24.0f;
-    constexpr float closest_tilted = 170.0f;
+    constexpr float closest_tilted = 140.0f;
+    // Slopes (as the HarbourMasters ports' camera does): walking up or down a slope, the view
+    // tilts with it so the ground ahead shows: the eye rises (downhill, away from the camera: looking
+    // down it) or comes down (uphill), by slope_follow of the slope's angle along the view, at most
+    // slope_tilt_most. The slope is measured from Conker's own steps on the ground (each
+    // slope_sample_step apart) and followed over slope_ease_seconds. (Only the angle: moving the
+    // game's look-at point instead, the game eased its own from it and it crept away.)
+    constexpr float slope_follow = 0.5f;
+    constexpr float slope_tilt_most = 12.0f * degrees_to_radians;
+    constexpr float slope_sample_step = 24.0f;
+    constexpr float slope_ease_seconds = 0.5f;
+    constexpr uint32_t player_object = 0x800CC2D0; // Conker (+0x14 position, +0x100 flags: 0x01 on the ground)
     // The farthest-room search: halvings of the step the ball can't make, and how near the ball
     // must end to its goal to have got there.
     constexpr int reach_halvings = 4;
@@ -145,6 +156,10 @@ namespace {
         float reach = 0.0f;             // the orbit's eased distance (0: none yet)
         float lift = 0.0f;              // radians the eye is raised out of a squeeze
         float side = 0.0f;              // radians the eye is turned aside from the player's angle (walls)
+        bool step_known = false;        // step_from holds where Conker's last slope sample was
+        float step_from[3] = {};
+        float slope = 0.0f;             // the ground's rise per unit along the view, as last measured
+        float shown_slope = 0.0f;       // eased
         double last_view = 0.0;         // game seconds at the last view
     } orbit;
     bool was_normal_camera = false; // conker::normal_camera (Camera: Field of View)
@@ -401,6 +416,33 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     const double now = conker::testing::game_seconds();
     const float seconds = (float)std::clamp(now - orbit.last_frame, 0.0, 0.1);
     orbit.last_frame = now;
+    // Slopes: Conker's rise per unit walked on the ground, along the view (the eye looks the other way
+    // from its direction, yaw). Stepping sideways to the view, or in the air, it's kept.
+    {
+        const gpr player = (gpr)(int32_t)player_object;
+        const bool grounded = ((uint32_t)MEM_W(0x100, player) >> 24) == 0x01;
+        const float pos[3] = { read_float(rdram, player, 0x14), read_float(rdram, player, 0x18), read_float(rdram, player, 0x1C) };
+        if (!grounded) {
+            orbit.step_known = false;
+        } else if (!orbit.step_known) {
+            std::memcpy(orbit.step_from, pos, sizeof(pos));
+            orbit.step_known = true;
+        } else {
+            const float dx = pos[0] - orbit.step_from[0], dz = pos[2] - orbit.step_from[2];
+            const float walked = std::sqrt(dx * dx + dz * dz);
+            if (walked >= slope_sample_step) {
+                const float rise = std::clamp((pos[1] - orbit.step_from[1]) / walked, -1.0f, 1.0f);
+                const float along = -(dx * std::cos(orbit.yaw) + dz * std::sin(orbit.yaw)) / walked;
+                orbit.slope = rise * along;
+                std::memcpy(orbit.step_from, pos, sizeof(pos));
+            }
+        }
+        static const char* test_slope = std::getenv("CONKER_TEST_SLOPE"); // (testing: a made-up slope)
+        if (test_slope != nullptr) {
+            orbit.slope = (float)std::atof(test_slope);
+        }
+        orbit.shown_slope += (orbit.slope - orbit.shown_slope) * (1.0f - std::exp(-seconds / slope_ease_seconds));
+    }
     if (orbit.reach <= 0.0f) {
         orbit.reach = reach;
     } else {
@@ -412,8 +454,9 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     const float tilt_room = std::min(closest_tilted, orbit.reach);
     orbit.pitch = std::max(orbit.pitch, -std::asin(std::clamp((cy - lowest) / tilt_room, 0.0f, 1.0f)));
     const float look[3] = { cx, cy, cz };
+    const float slope_tilt = std::clamp(-std::atan(orbit.shown_slope) * slope_follow, -slope_tilt_most, slope_tilt_most);
     auto direction = [&](float lift, float out[3], float side = 0.0f) {
-        const float pitch = std::min(orbit.pitch + lift, max_pitch);
+        const float pitch = std::min(orbit.pitch + slope_tilt + lift, max_pitch);
         out[0] = std::cos(pitch) * std::cos(orbit.yaw + side);
         out[1] = std::sin(pitch);
         out[2] = std::cos(pitch) * std::sin(orbit.yaw + side);
@@ -486,7 +529,7 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     for (int i = 0; i < 3; i++) target[i] = look[i] + dir[i] * distance;
     static const bool trace_sight = std::getenv("CONKER_CAM_TRACE") != nullptr;
     if (trace_sight) {
-        std::printf("[sight] t=%.3f reach %.1f distance %.1f pitch %.1f lift %.1f side %.1f us %lld\n", now, orbit.reach, distance, orbit.pitch * 57.2958f, orbit.lift * 57.2958f, orbit.side * 57.2958f,
+        std::printf("[sight] t=%.3f reach %.1f distance %.1f pitch %.1f lift %.1f side %.1f slope %.2f us %lld\n", now, orbit.reach, distance, orbit.pitch * 57.2958f, orbit.lift * 57.2958f, orbit.side * 57.2958f, orbit.shown_slope,
             (long long)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - timing_start).count());
     }
     // Placed directly: the game's collision (which would slide the camera from last frame's eye,
@@ -557,8 +600,12 @@ extern "C" void conker_mouse_camera(uint8_t* rdram, recomp_context* ctx) {
         orbit.reach = 0.0f;
         orbit.lift = 0.0f;
         orbit.side = 0.0f;
+        orbit.step_known = false;
+        orbit.slope = 0.0f;
+        orbit.shown_slope = 0.0f;
     }
 }
+
 
 bool conker::normal_camera() {
     return was_normal_camera;
@@ -601,3 +648,4 @@ void conker::free_camera_stick(float* x, float* y) {
         *y = -*y;
     }
 }
+
