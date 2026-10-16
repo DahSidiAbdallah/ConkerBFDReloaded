@@ -457,6 +457,9 @@ uint16_t conker::qol::apply_toggles(uint16_t buttons) {
 namespace {
     constexpr float walk_stick = 0.3f;
     constexpr double walk_tap_seconds = 0.3; // Toggle L: only a tap this short toggles, on release
+    // ...and not this soon after a cutscene: the fade to black that ends one comes after the game's last
+    // "skip?" check (a player's video: a tap there, him walking once the level showed).
+    constexpr double walk_after_cutscene_seconds = 1.0;
     bool walk_toggled = false;
     bool walk_l_was_held = false;
     int64_t walk_l_pressed = 0;     // when L went down
@@ -490,6 +493,10 @@ namespace {
             case 0x21: case 0x36: // turning, landing
             case 0x7A:            // pressed against a wall
             case 0x64: case 0x65: case 0x66: // on a beam: walking, balancing
+            // Standing idle a while (seen in a run left alone): the yo-yo, juggling, looking around,
+            // sitting down and so on. A tap there used to do nothing.
+            case 0x04: case 0x25: case 0x5E: case 0x5F: case 0x60: case 0x87: case 0x88: case 0x89:
+            case 0x9B: case 0xB3: case 0xFA: case 0x171: case 0x172: case 0x173: case 0x174:
                 return true;
             default:
                 return false;
@@ -587,13 +594,14 @@ void conker::qol::apply_walk(uint16_t buttons, float* x, float* y) {
         walk_l_pressed = ticks();
         walk_l_in_cutscene = false;
     }
-    if (l_held && conker::qol::cutscene_playing()) {
+    const bool cutscene = seconds_since(cutscene_seen.load()) < walk_after_cutscene_seconds;
+    if (l_held && cutscene) {
         walk_l_in_cutscene = true;
     }
     // Only on foot (his own state: not holding a gun, swimming and so on, where L may be something
     // else and the walk doesn't apply): a tap there used to switch it unseen until he was back on foot.
     if (mode == 2 && !l_held && walk_l_was_held && !walk_l_in_cutscene && on_foot.load() &&
-        !conker::qol::cutscene_playing() && seconds_since(walk_l_pressed) < walk_tap_seconds) {
+        !cutscene && seconds_since(walk_l_pressed) < walk_tap_seconds) {
         walk_toggled = !walk_toggled;
     }
     walk_l_was_held = l_held;
@@ -649,9 +657,13 @@ bool conker::qol::cutscene_playing() {
 // Reduce Motion Effects: func_151D6778 draws the motion blur (Conker drunk at the start of the game:
 // the last frames left as ghosts over the picture) when its strength, D_800BE574 ($v1 at 0x151D6798),
 // isn't 0. Taken as 0 there, it draws none; the game's own value is left as it is.
+// A blur that's drawn is told to widescreen.cpp (frames between the game's aren't drawn then).
 extern "C" void conker_motion_blur(uint8_t* rdram, recomp_context* ctx) {
     if (conker::qol::reduce_motion()) {
         ctx->r3 = 0;
+    }
+    if (ctx->r3 != 0) {
+        conker::motion_blur_drawn();
     }
 }
 
@@ -683,6 +695,8 @@ void conker::qol::on_vi_memory(uint8_t* rdram) {
                 std::fwrite(rdram, 1, 8 * 1024 * 1024, f);
                 std::fclose(f);
             }
+            // And the free camera's last few seconds, frame by frame (free_camera.cpp).
+            conker::free_camera_write_history(recomp::get_config_path() / ("camera_" + std::to_string(count) + ".txt"));
         }
     }
     conker::qol::longer_spin_on_vi(rdram);

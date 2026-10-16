@@ -1,16 +1,19 @@
 // Aiming Crosshair (Conker tab): a red dot in the middle of the screen while Conker aims, so it's
-// clear where a throw goes: in the game's second aiming mode (func_15126378: throwables, the
-// magnum; look_aim.cpp's conker_aim_stick) without zoom (the sniper scope draws its own), and in the
-// look mode (func_15120158, conker_look_targets) when the game put Conker in it to throw (the
-// knives in the barn) rather than the player holding R to look around. Single player only.
+// clear where a shot or a throw goes. Single player only.
+//
+// Overhauled with what CBFD-Recompiled V0.1.6's reticle (MIT) does better: it shows only for what's
+// known to aim something, by the look mode's kind (crosshair::look_mode: the shotgun) and the second aiming
+// mode (func_15126378; look_aim.cpp's conker_aim_stick) without zoom (the sniper scope draws its own).
+// Only where it's exact, for shots that fly straight to the middle: thrown things (the barn's knives, the
+// slingshot) fly in an arc that drops more the further they go, so no one spot on the screen is right at
+// every distance (raised for a middle distance, it was a little off nearer and further: a player found it
+// finicky and asked for it gone there). It's hidden during cutscenes and while a speech or thought bubble is up.
 //
 // Like the FPS counter (fps_counter.cpp) it's a recompui context of its own that takes no input,
 // drawn over the game: a red dot, made of a plain element. It's shown while the aiming
 // mode ran in the last tenth of a second (the game runs at 30 frames a second).
 
-#include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -25,13 +28,8 @@
 
 namespace {
     constexpr uint16_t button_r = 0x0010, button_l = 0x0020; // R_TRIG, L_TRIG
-    // How far above the centre the dot goes, as a part of the half height (0: the centre).
-    std::atomic<float> dot_raise{0.0f};
-    float shown_raise = -1.0f;
-    recompui::Element* dot_element = nullptr;
     std::atomic<uint16_t> buttons_held{0};
-    // When R or L was last held, and when the look mode started running without them (clock ticks).
-    std::atomic<int64_t> look_button_at{0}, look_alone_since{0}, look_last_ran{0};
+    std::atomic<int64_t> look_button_at{0}; // when R or L was last held (clock ticks)
 }
 
 namespace {
@@ -39,7 +37,6 @@ namespace {
     constexpr auto still_aiming = std::chrono::milliseconds(100);
 
     std::atomic<int64_t> aimed_at{0}; // when the aiming mode last ran, unzoomed (clock ticks)
-    std::atomic<uint32_t> current_room{0}; // the room the look mode last ran in
     std::atomic<int64_t> bubble_at{0}; // when a speech or thought bubble's text was last drawn
     std::atomic<bool> ui_ready = false; // recompui's UI exists (made on the render thread as RT64 starts)
     bool created = false;
@@ -64,7 +61,6 @@ namespace {
         dot->set_border_radius(9.0f);
         dot->set_border_color({ 0x20, 0x00, 0x00, 0xC0 });
         dot->set_background_color({ 0xFF, 0x20, 0x20, 0xF0 });
-        dot_element = dot;
         context.close();
         created = true;
     }
@@ -86,53 +82,25 @@ namespace {
 
 void conker::crosshair::aiming(bool zoomed) {
     track(zoomed ? "aiming, zoomed" : "aiming");
-    dot_raise = 0.0f;
     if (!zoomed) {
         aimed_at = clock::now().time_since_epoch().count();
     }
 }
 
-void conker::crosshair::look_mode(float vertical_fov, uint8_t kind, uint32_t room) {
-    current_room = room;
+void conker::crosshair::look_mode(uint8_t kind) {
     {
         char how[32];
         std::snprintf(how, sizeof how, "look mode runs, kind %02X", kind);
         track(how);
     }
-    // Only when the game put Conker in the look mode to throw (the knives in the barn), not when the
-    // player looks around with R or L: not while either is held, nor for a moment after (the camera
-    // swings back for a few frames once let go), and only once the look mode has run that way for a
-    // little while.
-    const int64_t now = clock::now().time_since_epoch().count();
-    const auto ticks = [](auto d) { return (int64_t)std::chrono::duration_cast<clock::duration>(d).count(); };
-    if (now - look_last_ran.load() > ticks(std::chrono::milliseconds(200))) {
-        look_alone_since = now; // (a new spell of the look mode)
-    }
-    look_last_ran = now;
-    if ((buttons_held.load() & (button_r | button_l)) != 0 || now - look_button_at.load() < ticks(std::chrono::milliseconds(700))) {
-        look_alone_since = now;
+    // Shown only for the look mode's kinds that aim a straight shot (the camera's +0x23E, which the look mode picks
+    // its settings by), as CBFD-Recompiled V0.1.6's reticle does: the rest (plain R-Look 0x00, hypnotising the raptor,
+    // reading "What To Do"...) aren't aiming anything, and the thrown things (the barn's knives 0x0A, the slingshot
+    // 0x02) arc (see the top).
+    if (kind != 0x3B) { // the shotgun (Spooky), aimed holding R
         return;
     }
-    if (now - look_alone_since.load() >= ticks(std::chrono::milliseconds(250))) {
-        {
-            char how[32];
-            std::snprintf(how, sizeof how, "look mode, kind %02X", kind);
-            track(how);
-        }
-        aimed_at = now;
-        // The knives' throws arc, flying above the view's centre: measured on the knives in the barn
-        // (the knife lands 0.41 of the way from the centre to the top, at the game's 50 degrees), a
-        // fixed angle above it, so it's placed by the field of view in use. Shots fly straight (the
-        // laser gun in the Count's attic lands at the centre): the dot stays there. The knives are the
-        // barn's (room 0x01); the look's kind is logged (CONKER_TEST_TRACK) to tell them apart by it.
-        constexpr float throw_angle = 10.8f * 3.14159265f / 180.0f;
-        constexpr uint32_t barn_room = 0x01;
-        float raise = 0.0f;
-        if (current_room.load() == barn_room && vertical_fov > 1.0f && vertical_fov < 170.0f) {
-            raise = std::tan(throw_angle) / std::tan(vertical_fov * 0.5f * 3.14159265f / 180.0f);
-        }
-        dot_raise = std::clamp(raise, 0.0f, 0.9f);
-    }
+    aimed_at = clock::now().time_since_epoch().count();
 }
 
 void conker::crosshair::set_buttons(uint16_t buttons) {
@@ -172,13 +140,6 @@ void conker::crosshair::update() {
     }
     if (!recompui::is_context_shown(context)) {
         recompui::show_context(context, "");
-    }
-    const float raise = dot_raise.load();
-    if (raise != shown_raise && dot_element != nullptr) {
-        context.open();
-        dot_element->set_top(50.0f * (1.0f - raise), recompui::Unit::Percent);
-        context.close();
-        shown_raise = raise;
     }
 }
 

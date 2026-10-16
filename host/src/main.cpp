@@ -24,6 +24,15 @@
 
 #define XXH_INLINE_ALL
 #include "xxhash.h"
+#include "miniz.h"
+
+extern "C" {
+    // segments.c: the US ROM's .game code and .debugger, unpacked, as words.
+    extern const size_t conker_game_segment_size;
+    extern const uint32_t conker_game_segment[];
+    extern const size_t conker_debugger_segment_size;
+    extern const uint32_t conker_debugger_segment[];
+}
 
 #include "recomp.h"
 #include "librecomp/game.hpp"
@@ -148,35 +157,72 @@ namespace {
         return std::filesystem::current_path();
     }
 
-    // The US ROM, or a ROM hack of it that only changes the game's data (the uncensored speech, the
-    // French translation).
+    // The US ROM, or a ROM hack of it that leaves the game's code alone: the uncensored speech, and
+    // translations (French, German...), which change its text, voices, textures and other data.
+    //
+    // The code is compared as it runs, not as the ROM stores it (as CBFD-Recompiled V0.1.6 does,
+    // MIT): .init as it is, .game's code unpacked (it's compressed in the ROM with Rare's "rzip": a
+    // hack that changes .game's data recompresses the segment, so its code reads differently in the
+    // ROM though it's the same, as in the Russian translation), and .debugger as it is. Everything
+    // else (.game's data, the assets) may differ. Before this, a fixed stretch of the ROM had to
+    // match, which took in some of the assets past the code: the German translation was refused.
     bool accept_rom(std::span<const uint8_t> rom) {
         if (XXH3_64bits(rom.data(), rom.size()) == conker::us_rom_hash) {
             return true;
         }
-        if (rom.size() < conker::rom_code_end) {
+        constexpr size_t init_start = 0x40, init_end = 0x2D4B0;  // after the header (a hack may rename it)
+        constexpr uint32_t us_init_crc = 0x35984403;
+        constexpr size_t game_rzip = 0x42450, game_rzip_end = 0x19EA88;  // compressed .game
+        constexpr uint32_t game_xor = 0x8039CCCA;
+        constexpr size_t debugger_start = 0x19EA88;
+        if (rom.size() < debugger_start + conker_debugger_segment_size) {
             return false;
         }
-        if (XXH3_64bits(rom.data() + conker::rom_code_start, conker::rom_code_end - conker::rom_code_start) == conker::us_code_hash) {
-            return true;
-        }
-        // The code around .game's compressed data unchanged, and that data a known one.
-        XXH3_state_t* state = XXH3_createState();
-        XXH3_64bits_reset(state);
-        XXH3_64bits_update(state, rom.data() + conker::rom_code_start, conker::rom_game_data_start - conker::rom_code_start);
-        XXH3_64bits_update(state, rom.data() + conker::rom_game_data_end, conker::rom_code_end - conker::rom_game_data_end);
-        const uint64_t around = XXH3_64bits_digest(state);
-        XXH3_freeState(state);
-        if (around != conker::us_code_around_game_data_hash) {
+        if (mz_crc32(MZ_CRC32_INIT, rom.data() + init_start, init_end - init_start) != us_init_crc) {
             return false;
         }
-        const uint64_t data = XXH3_64bits(rom.data() + conker::rom_game_data_start, conker::rom_game_data_end - conker::rom_game_data_start);
-        for (uint64_t known : conker::known_game_data_hashes) {
-            if (data == known) {
-                return true;
+        auto word = [&rom](size_t offset) {
+            return (uint32_t(rom[offset]) << 24) | (uint32_t(rom[offset + 1]) << 16) | (uint32_t(rom[offset + 2]) << 8) | rom[offset + 3];
+        };
+        for (size_t i = 0; i < conker_debugger_segment_size / 4; i++) {
+            if (word(debugger_start + i * 4) != conker_debugger_segment[i]) {
+                return false;
             }
         }
-        return false;
+        // .game's code blocks: a table of their offsets (from its second word, XORed, a 0 ends it),
+        // each a 4-byte length and a raw deflate stream of a page of code.
+        std::vector<size_t> starts;
+        for (size_t entry = game_rzip + 4; entry + 4 <= game_rzip_end; entry += 4) {
+            const uint32_t w = word(entry);
+            if (w == 0) {
+                break;
+            }
+            starts.push_back(game_rzip + (w ^ game_xor));
+        }
+        std::vector<uint8_t> code(conker_game_segment_size);
+        size_t unpacked = 0;
+        for (size_t i = 0; i + 1 < starts.size(); i++) {
+            const size_t start = starts[i] + 4, end = starts[i + 1];
+            if (end <= start || end > rom.size() || unpacked >= code.size()) {
+                return false;
+            }
+            const size_t size = tinfl_decompress_mem_to_mem(code.data() + unpacked, code.size() - unpacked,
+                rom.data() + start, end - start, 0);
+            if (size == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) {
+                return false;
+            }
+            unpacked += size;
+        }
+        if (unpacked != code.size()) {
+            return false;
+        }
+        for (size_t i = 0; i < code.size() / 4; i++) {
+            const uint32_t w = (uint32_t(code[i * 4]) << 24) | (uint32_t(code[i * 4 + 1]) << 16) | (uint32_t(code[i * 4 + 2]) << 8) | code[i * 4 + 3];
+            if (w != conker_game_segment[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 }
 

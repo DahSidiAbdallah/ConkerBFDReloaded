@@ -1,0 +1,15 @@
+2560 1440
+panel_00.png 17 17 618 515 sunflower
+panel_01.png 17 510 638 541 poo
+panel_02.png 17 1029 655 395 catfish
+panel_03.png 629 17 613 445 gregg
+panel_04.png 648 439 576 533 dollar
+panel_05.png 668 939 533 485 fangy
+panel_06.png 1238 17 677 515 batula
+panel_07.png 1217 509 715 483 chief
+panel_08.png 1199 959 753 465 sergeant
+panel_09.png 1909 17 635 614 king
+panel_10.png 1934 609 610 383 panther
+panel_11.png 1951 970 593 454 berri
+shade.png 1460 440 1100 1000 shade
+logo.png 958 250 645 940 logo

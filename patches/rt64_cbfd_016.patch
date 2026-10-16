@@ -1,0 +1,304 @@
+diff -ruN before/src/hle/rt64_game_frame.cpp ours/src/hle/rt64_game_frame.cpp
+--- a/src/hle/rt64_game_frame.cpp
++++ b/src/hle/rt64_game_frame.cpp
+@@ -297,9 +297,10 @@
+             }
+ 
+             // Match the transforms linearly in the order they were submitted. An ID with a different number of
+-            // transforms than last frame isn't matched at all: pairing them in order would pair each transform after
+-            // the first one added or removed with its neighbour's, and the model would fly apart for a frame (Conker's
+-            // characters, whose parts change as their animation does). Unmatched, it's drawn as it is for that frame.
++            // transforms than last frame can't be paired in order: each transform after the first one added or removed
++            // would be paired with its neighbour's, and the model would fly apart for a frame (Conker's characters,
++            // cut into chunks differently as their animation changes). Each is paired with last frame's closest instead
++            // (alignTransforms). Matching none of them made the whole model snap each time (issue #76).
+             ModifiedBuffers modifiedBuffers;
+             auto curIt = curWorkload.transformIdMap.begin();
+             auto prevIt = prevWorkload.transformIdMap.begin();
+@@ -316,8 +317,19 @@
+                     const size_t curCount = curWorkload.transformIdMap.count(id);
+                     const size_t prevCount = prevWorkload.transformIdMap.count(id);
+                     if (curCount != prevCount) {
+-                        std::advance(curIt, curCount);
+-                        std::advance(prevIt, prevCount);
++                        thread_local std::vector<uint32_t> curIndices;
++                        thread_local std::vector<uint32_t> prevIndices;
++                        curIndices.clear();
++                        prevIndices.clear();
++                        for (size_t i = 0; i < curCount; i++, curIt++) {
++                            curIndices.push_back(curIt->second);
++                        }
++
++                        for (size_t i = 0; i < prevCount; i++, prevIt++) {
++                            prevIndices.push_back(prevIt->second);
++                        }
++
++                        alignTransforms(curWorkload, prevWorkload, curWorkloadMap, prevWorkloadMap, curIndices, prevIndices, modifiedBuffers);
+                         continue;
+                     }
+ 
+@@ -734,7 +746,45 @@
+         }
+     }
+ 
+-    void GameFrame::matchTransform(Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &curWorkloadMap, const GameFrameMap::WorkloadMap *prevWorkloadMap, uint32_t curTransformIndex, uint32_t prevTransformIndex, ModifiedBuffers &modifiedBuffers) {
++    void GameFrame::alignTransforms(Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &curWorkloadMap, const GameFrameMap::WorkloadMap *prevWorkloadMap,
++        const std::vector<uint32_t> &curIndices, const std::vector<uint32_t> &prevIndices, ModifiedBuffers &modifiedBuffers)
++    {
++        // Conker's characters are skinned meshes drawn in chunks, a few vertices each with one bone's matrix, the same
++        // bone's matrix loaded again for each of its chunks. When the animation changes, the mesh is cut into chunks
++        // differently: their number, sizes and order change, but the bones they're drawn with are the same ones. So each
++        // transform is paired with last frame's closest (its position moved on by its velocity, plus OrientationWeight
++        // times how differently it's turned; mirrored ones aren't), however many vertices either draws, and several may
++        // pair with the same one: those are the same bone. None further than MaxAlignCost is paired: that one snaps. The
++        // chunks paired aren't the same geometry, so their vertices aren't interpolated (in a frame with the same chunks,
++        // a character's vertices don't move: the bones do).
++        const float OrientationWeight = 32.0f;
++        const float MaxAlignCost = 64.0f;
++        const hlslpp::float4x4 identity = hlslpp::float4x4::identity();
++        for (uint32_t curIndex : curIndices) {
++            const hlslpp::float4x4 &curTransform = curWorkload.drawData.worldTransforms[curIndex];
++            float bestCost = MaxAlignCost;
++            uint32_t bestPrev = UINT32_MAX;
++            for (uint32_t prevIndex : prevIndices) {
++                const RigidBody *prevRigidBody = (prevWorkloadMap != nullptr) ? &prevWorkloadMap->transforms[prevIndex].rigidBody : nullptr;
++                const TransformMatchResult result = computeTransformMatch(curTransform, identity, prevWorkload.drawData.worldTransforms[prevIndex], identity, prevRigidBody);
++                if (!result.valid) {
++                    continue;
++                }
++
++                const float cost = result.positionDifference + OrientationWeight * result.orientationDifference;
++                if (cost < bestCost) {
++                    bestCost = cost;
++                    bestPrev = prevIndex;
++                }
++            }
++
++            if (bestPrev != UINT32_MAX) {
++                matchTransform(curWorkload, prevWorkload, curWorkloadMap, prevWorkloadMap, curIndex, bestPrev, modifiedBuffers, false);
++            }
++        }
++    }
++
++    void GameFrame::matchTransform(Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &curWorkloadMap, const GameFrameMap::WorkloadMap *prevWorkloadMap, uint32_t curTransformIndex, uint32_t prevTransformIndex, ModifiedBuffers &modifiedBuffers, bool interpolateVertices) {
+         GameFrameMap::TransformMap &curTransformMap = curWorkloadMap.transforms[curTransformIndex];
+         if (prevWorkloadMap != nullptr) {
+             curTransformMap.rigidBody = prevWorkloadMap->transforms[prevTransformIndex].rigidBody;
+@@ -758,7 +808,7 @@
+         uint32_t curVertexCount = curWorkload.drawData.worldTransformVertexCount(curTransformIndex);
+         uint32_t prevVertexIndex = prevWorkload.drawData.worldTransformVertexIndices[prevTransformIndex];
+         uint32_t prevVertexCount = prevWorkload.drawData.worldTransformVertexCount(prevTransformIndex);
+-        if (((curGroup.vertexInterpolation != G_EX_COMPONENT_SKIP) || (curGroup.texcoordInterpolation == G_EX_COMPONENT_AUTO)) && (curVertexCount == prevVertexCount)) {
++        if (interpolateVertices && ((curGroup.vertexInterpolation != G_EX_COMPONENT_SKIP) || (curGroup.texcoordInterpolation == G_EX_COMPONENT_AUTO)) && (curVertexCount == prevVertexCount)) {
+             const std::vector<float> &curPosFloats = curWorkload.drawData.posFloats;
+             const std::vector<float> &prevPosFloats = prevWorkload.drawData.posFloats;
+             std::vector<float> &curVelFloats = curWorkload.drawData.velFloats;
+diff -ruN before/src/hle/rt64_game_frame.h ours/src/hle/rt64_game_frame.h
+--- a/src/hle/rt64_game_frame.h
++++ b/src/hle/rt64_game_frame.h
+@@ -127,7 +127,10 @@
+         void set(WorkloadQueue &workloadQueue, const uint32_t *workloadIndices, uint32_t indicesCount);
+         void match(RenderWorker *worker, WorkloadQueue &workloadQueue, const GameFrame &prevFrame, BufferUploader *velocityUploader, bool &velocityUploaderUsed, bool &tileInterpolationUsed, bool &lookAtInterpolationUsed);
+         void matchScene(WorkloadQueue &workloadQueue, const GameFrame &prevFrame, const GameScene &curScene, const GameScene &prevScene, std::unordered_map<uint32_t, ModifiedBuffers> &workloadsModified, bool &tileInterpolationUsed, bool &lookAtInterpolationUsed);
+-        void matchTransform(Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &curWorkloadMap, const GameFrameMap::WorkloadMap *prevWorkloadMap, uint32_t curTransformIndex, uint32_t prevTransformIndex, ModifiedBuffers &modifiedBuffers);
++        void matchTransform(Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &curWorkloadMap, const GameFrameMap::WorkloadMap *prevWorkloadMap, uint32_t curTransformIndex, uint32_t prevTransformIndex, ModifiedBuffers &modifiedBuffers, bool interpolateVertices = true);
++        // Conker: matches an ID's transforms when there are more or fewer than last frame, each with last frame's closest.
++        void alignTransforms(Workload &curWorkload, const Workload &prevWorkload, GameFrameMap::WorkloadMap &curWorkloadMap, const GameFrameMap::WorkloadMap *prevWorkloadMap,
++            const std::vector<uint32_t> &curIndices, const std::vector<uint32_t> &prevIndices, ModifiedBuffers &modifiedBuffers);
+         void buildCallHashMap(uint32_t sceneProjIndex, const Workload &workload, const Projection &proj, std::multimap<uint64_t, GameCallMap> &hashMap) const;
+         void buildTransformIdMap(const Workload &workload, std::multimap<uint32_t, uint32_t> &idMap, std::vector<uint32_t> &ignoredIdVector) const;
+         uint64_t hashFromCall(const GameCall &call, uint32_t matrixIdHash) const;
+diff -ruN before/src/hle/rt64_rsp.cpp ours/src/hle/rt64_rsp.cpp
+--- a/src/hle/rt64_rsp.cpp
++++ b/src/hle/rt64_rsp.cpp
+@@ -1080,6 +1080,22 @@
+                 tcFloats.emplace_back((float)((double)((vertices[i].s) * TextureSc) / Divisor));
+                 tcFloats.emplace_back((float)((double)((vertices[i].t) * TextureTc) / Divisor));
+             }
++
++            // Conker's shadows (issues #73 and #75): a character's shadow is the patch of ground under it drawn again
++            // with a 64 by 64 texture on it, which the game draws every frame (the character's silhouette) and
++            // RT64 renders at the resolution's scale. Its texture coordinates are pulled in 1/16 of the way towards the
++            // middle (2 texels at each edge), so the patch never samples the texture's outermost texels. On the
++            // reporter's AMD GPU under Linux, at high resolutions, those came out dark, and a thin dark line ran along
++            // the edge of the patch next to Conker. Clamping the texture instead of wrapping it kept the line, so it's
++            // in the edge texels themselves; this inset took it away. The silhouette is drawn inside the edges, so the
++            // shadow looks the same, 6% larger (checked on Windows).
++            if ((workload.drawData.transformGroups[extended.curModelMatrixIdGroupIndex].matrixId >> 16) == 0x5348) {
++                const float shadowPull = 1.0f - 1.0f / 16.0f;
++                const size_t added = size_t(dstMax - dstIndex) * 2;
++                for (size_t i = tcFloats.size() - added; i < tcFloats.size(); i++) {
++                    tcFloats[i] = 32.0f + (tcFloats[i] - 32.0f) * shadowPull;
++                }
++            }
+         }
+     }
+ 
+diff -ruN before/src/hle/rt64_state.cpp ours/src/hle/rt64_state.cpp
+--- a/src/hle/rt64_state.cpp
++++ b/src/hle/rt64_state.cpp
+@@ -1740,6 +1740,9 @@
+         }
+ #   endif
+ 
++        // Conker: whether this frame is drawn without frames between it and the next (setInterpolationPaused).
++        workload.skipInterpolation = interpolationPaused();
++
+         // Store the presentation rate in the workload.
+         if (extended.refreshRate != UINT16_MAX) {
+             workload.viOriginalRate = extended.refreshRate;
+diff -ruN before/src/hle/rt64_workload.cpp ours/src/hle/rt64_workload.cpp
+--- a/src/hle/rt64_workload.cpp
++++ b/src/hle/rt64_workload.cpp
+@@ -4,7 +4,20 @@
+ 
+ #include "rt64_workload.h"
+ 
++#include <atomic>
++
+ namespace RT64 {
++    // Conker: see rt64_workload.h.
++    static std::atomic<bool> interpolationPausedFlag{ false };
++
++    void setInterpolationPaused(bool paused) {
++        interpolationPausedFlag = paused;
++    }
++
++    bool interpolationPaused() {
++        return interpolationPausedFlag;
++    }
++
+     // Common functions.
+ 
+     static uint64_t roundUp(uint64_t value, uint64_t powerOf2Alignment) {
+diff -ruN before/src/hle/rt64_workload.h ours/src/hle/rt64_workload.h
+--- a/src/hle/rt64_workload.h
++++ b/src/hle/rt64_workload.h
+@@ -24,6 +24,13 @@
+ #include "rt64_transform_group.h"
+ 
+ namespace RT64 {
++    // Conker: whether the frames the game makes from now on are drawn without frames between them, set by the
++    // game's host each frame and stored in each workload as it's made (Workload::skipInterpolation). Conker's
++    // motion blur (drunk) blends each frame with a copy of the last: with frames drawn between the game's, the
++    // last frame is a fraction of a frame old, and the blur was all but gone (issue #77).
++    void setInterpolationPaused(bool paused);
++    bool interpolationPaused();
++
+     struct DrawData {
+         std::vector<float> posFloats;
+         std::vector<float> velFloats;
+@@ -250,6 +257,8 @@
+         uint64_t workloadId = 0;
+         uint64_t presentId = 0;
+         bool paused = false;
++        // Conker: drawn without frames between it and the next (setInterpolationPaused).
++        bool skipInterpolation = false;
+ 
+         struct {
+             uint32_t testZIndexCount = 0;
+diff -ruN before/src/hle/rt64_workload_queue.cpp ours/src/hle/rt64_workload_queue.cpp
+--- a/src/hle/rt64_workload_queue.cpp
++++ b/src/hle/rt64_workload_queue.cpp
+@@ -1051,7 +1051,7 @@
+                     matchingProfiler.log();
+ 
+                     const bool displayRateAboveOriginal = (workload.viOriginalRate > 0) && (workloadConfig.targetRate > workload.viOriginalRate);
+-                    generateInterpolatedFrames = !workload.paused && displayRateAboveOriginal && !interpolationTargetKey.isEmpty();
++                    generateInterpolatedFrames = !workload.paused && !workload.skipInterpolation && displayRateAboveOriginal && !interpolationTargetKey.isEmpty();
+ 
+                     const bool resetTicks = !generateInterpolatedFrames || (originalRateForTicks != workload.viOriginalRate) || (displayRateForTicks != workloadConfig.targetRate) || !displayRateAboveOriginal;
+                     if (resetTicks) {
+diff -ruN before/src/render/rt64_framebuffer_renderer.cpp ours/src/render/rt64_framebuffer_renderer.cpp
+--- a/src/render/rt64_framebuffer_renderer.cpp
++++ b/src/render/rt64_framebuffer_renderer.cpp
+@@ -604,8 +604,27 @@
+             case InstanceDrawCall::Type::FillRect: {
+                 const auto &clearRect = drawCall.clearRect;
+                 RenderTarget *chosenTarget = (fbStorage->colorTarget != nullptr) ? fbStorage->colorTarget : fbStorage->depthTarget;
+-                bool rectCoversWholeTarget = (clearRect.rect.left == 0) && (clearRect.rect.top == 0) && (uint32_t(clearRect.rect.right) == chosenTarget->width) && (uint32_t(clearRect.rect.bottom) == chosenTarget->height);
+-                const RenderRect *clearRects = rectCoversWholeTarget ? nullptr : &clearRect.rect;
++
++                // The rect, clipped to the target. A fill rect (drawn as this clear) can reach past the target's
++                // sides: Conker's cutscene pillarbox bars reach past both sides of the window. A clear's rects must
++                // be inside the target (Vulkan's vkCmdClearAttachments makes anything else undefined), and
++                // drivers differ in what they do with one that isn't. On Windows (NVIDIA, D3D12 and Vulkan)
++                // it was clipped as wanted. On Linux, lavapipe moved a rect starting left of the target to
++                // its left edge but kept its width, so the left bar came out too wide by the part that was
++                // off screen; and on the Steam Deck (RADV) one starting left of it seems not to be cleared at all,
++                // so there was no left bar and the strip kept old frames' pictures (issue #82). The right
++                // bar, which starts inside, was right everywhere.
++                RenderRect clippedRect = clearRect.rect;
++                clippedRect.left = std::max(clippedRect.left, 0);
++                clippedRect.top = std::max(clippedRect.top, 0);
++                clippedRect.right = std::min(clippedRect.right, int32_t(chosenTarget->width));
++                clippedRect.bottom = std::min(clippedRect.bottom, int32_t(chosenTarget->height));
++                if ((clippedRect.right <= clippedRect.left) || (clippedRect.bottom <= clippedRect.top)) {
++                    break;
++                }
++
++                bool rectCoversWholeTarget = (clippedRect.left == 0) && (clippedRect.top == 0) && (uint32_t(clippedRect.right) == chosenTarget->width) && (uint32_t(clippedRect.bottom) == chosenTarget->height);
++                const RenderRect *clearRects = rectCoversWholeTarget ? nullptr : &clippedRect;
+                 uint32_t clearRectCount = rectCoversWholeTarget ? 0 : 1;
+                 if (fbStorage->colorTarget != nullptr) {
+                     worker->commandList->clearColor(0, clearRect.color, clearRects, clearRectCount);
+diff -ruN before/src/render/rt64_projection_processor.cpp ours/src/render/rt64_projection_processor.cpp
+--- a/src/render/rt64_projection_processor.cpp
++++ b/src/render/rt64_projection_processor.cpp
+@@ -15,7 +15,23 @@
+         matrix[2][0] *= aspectRatioScale;
+         matrix[3][0] *= aspectRatioScale;
+     }
+-    
++
++    // How far ahead a perspective projection's camera is aimed: halfway between its near and far planes. Conker's Bad
++    // Fur Day aims each shadow's silhouette camera at the character, its planes just around it. With row vectors, w
++    // is the depth ahead (m[2][3] = -1) and z = m[2][2] * z + m[3][2] is -w at the near plane and w at the far one.
++    inline bool aimedDepth(const interop::float4x4 &m, float &depth) {
++        const float a = m[2][2];
++        const float b = m[3][2];
++        if ((m[2][3] != -1.0f) || (fabsf(a - 1.0f) < 1e-6f) || (fabsf(a + 1.0f) < 1e-6f)) {
++            return false;
++        }
++
++        const float nearDepth = b / (a - 1.0f);
++        const float farDepth = b / (a + 1.0f);
++        depth = 0.5f * (nearDepth + farDepth);
++        return std::isfinite(depth) && (nearDepth > 0.0f) && (farDepth > nearDepth);
++    }
++
+     // ProjectionProcessor
+ 
+     ProjectionProcessor::ProjectionProcessor() { }
+@@ -170,6 +186,31 @@
+ 
+             interop::float4x4 &prevViewProjTransform = drawData.prevViewProjTransforms[proj.transformsIndex];
+             prevViewProjTransform = hlslpp::mul(prevViewTransform, prevProjTransform);
++
++            // A shadow's silhouette (Conker's Bad Fur Day draws each into a 64 pixel wide 8-bit image, 0x800DE080, then
++            // lays it on the ground under the character as a texture): its camera is interpolated whole, each frame's
++            // scaled first so the place it's aimed at is at w = 1 (issue #76). The game aims the camera at the
++            // character anew every frame, from the light, and moves it nearer or further, zooming to match: standing
++            // still, its distance and zoom both doubled from one frame to the next, the silhouette the same size in
++            // both. View and projection interpolated apart, halfway each, were a camera neither frame had, and the
++            // shadow was drawn larger on the frames drawn in between. Scaled so, the cameras interpolate as the
++            // silhouette's points on the texture do near the character, as the shadow's texture coordinates on the
++            // ground are (GameFrame::matchTransform), and the two stay together.
++            const bool shadowSilhouette = (fbPair.colorImage.width == 64) && (fbPair.colorImage.siz == G_IM_SIZ_8b) && (proj.type == Projection::Type::Perspective);
++            if (shadowSilhouette && (prevProjMatrix != nullptr) && (prevViewMatrix != nullptr) && (rigidBody != nullptr) && (rigidBody->lerpTranslation || rigidBody->lerpRotation)) {
++                interop::float4x4 adjustedPrevProj = *prevProjMatrix;
++                adjustProjectionMatrix(adjustedPrevProj, projRatioScale);
++                const interop::float4x4 curProjTransform = drawData.projTransforms[proj.transformsIndex];
++                float prevDepth = 0.0f, curDepth = 0.0f;
++                if (aimedDepth(adjustedPrevProj, prevDepth) && aimedDepth(curProjTransform, curDepth)) {
++                    interop::float4x4 adjustedCurProj = curProjTransform;
++                    adjustProjectionMatrix(adjustedCurProj, projRatioScale);
++                    const interop::float4x4 prevAimed = hlslpp::mul(*prevViewMatrix, adjustedPrevProj) * (1.0f / prevDepth);
++                    const interop::float4x4 curAimed = hlslpp::mul(drawData.viewTransforms[proj.transformsIndex], adjustedCurProj) * (1.0f / curDepth);
++                    viewProjMatrix = lerpMatrix(prevAimed, curAimed, p.curFrameWeight);
++                    prevViewProjTransform = lerpMatrix(prevAimed, curAimed, p.prevFrameWeight);
++                }
++            }
+         }
+     }
+ 

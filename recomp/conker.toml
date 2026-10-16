@@ -566,6 +566,30 @@ func = "func_15019464"
 before_vram = 0x150194F8
 text = "{ extern void conker_camera_pass_sync(uint8_t*, recomp_context*); conker_camera_pass_sync(rdram, ctx); }"
 
+# From CBFD-Recompiled V0.1.6 (host/src/render_fixes.cpp): a sprite piece under a pixel across
+# (Windy's beehive smoke) is made a pixel before func_15095D34 divides by its width and height.
+[[patches.hook]]
+func = "func_15095D34"
+before_vram = 0x15095D58
+text = "{ extern void conker_sprite_piece_size(uint8_t*, recomp_context*); conker_sprite_piece_size(rdram, ctx); }"
+
+# From CBFD-Recompiled V0.1.6 (host/src/render_fixes.cpp): room in the frame's display lists, as
+# func_15015E80 allocates them (a crash leaving Spooky, the game halting in Windy).
+[[patches.hook]]
+func = "func_15015E80"
+before_vram = 0x15015ED0
+text = "{ extern void conker_display_list_size_first(uint8_t*, recomp_context*); conker_display_list_size_first(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_15015E80"
+before_vram = 0x15015F00
+text = "{ extern void conker_display_list_size_second(uint8_t*, recomp_context*); conker_display_list_size_second(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_15015E80"
+before_vram = 0x15015F28
+text = "{ extern void conker_display_list_limit(uint8_t*, recomp_context*); conker_display_list_limit(rdram, ctx); }"
+
 # After the piece's left edge is loaded ($f12, D_800D2C78; its right edge is that plus a width),
 # and where both of its returns meet ($v0 the end of what it wrote).
 [[patches.hook]]
@@ -820,3 +844,53 @@ text = "{ extern void conker_bubble_text_drawn(uint8_t*, recomp_context*); conke
 func = "func_1510D0EC"
 before_vram = 0x1510D360
 text = "{ extern void conker_picture_looked_up(uint8_t*, recomp_context*); conker_picture_looked_up(rdram, ctx); }"
+
+# Ledge Grab (host/src/ledge_grab.cpp): opened up, the grab search only takes edges of flat ground.
+[[patches.hook]]
+func = "func_150AC480"
+before_vram = 0x150AC53C
+text = "{ extern void conker_ledge_grab_flatness(uint8_t*, recomp_context*); conker_ledge_grab_flatness(rdram, ctx); }"
+
+# From CBFD-Recompiled V0.1.6: Graphics: Conker's Detail. Each game frame func_1502C6E8 picks every
+# object's model by how far it is from the camera; at 0x1502C92C the level is picked ($v1) and not
+# yet compared with the object's last, and Conker's is set to 0, his most detailed (model_detail.cpp).
+[[patches.hook]]
+func = "func_1502C6E8"
+before_vram = 0x1502C92C
+text = "{ extern void conker_model_detail(uint8_t*, recomp_context*); conker_model_detail(rdram, ctx); }"
+
+# From CBFD-Recompiled V0.1.6 (host/src/look_aim.cpp): Aiming: Swap Sticks with the shotgun: after R alone's
+# movement in Conker's state 0x3B (func_15063E84 returned, $s0 Conker), R alone shows the laser sight as R and Z do.
+[[patches.hook]]
+func = "func_15065A5C"
+before_vram = 0x15069028
+text = "{ extern void conker_shotgun_laser(uint8_t*, recomp_context*); conker_shotgun_laser(rdram, ctx); }"
+
+# And R alone's walk in state 0x3B (func_15064B94 picked 0x224 in $v1) is R and Z's (0x31B), with the gun up.
+[[patches.hook]]
+func = "func_15064B94"
+before_vram = 0x150651FC
+text = "{ extern void conker_shotgun_laser_walk(uint8_t*, recomp_context*); conker_shotgun_laser_walk(rdram, ctx); }"
+
+# Aiming: Lock-On: func_15063A38 turns the aim by the stick, or toward an enemy while +0x84 of $a0's +0x31C is
+# set ($t1, tested at 0x15063A80). With the setting Off the flag reads as clear.
+[[patches.hook]]
+func = "func_15063A38"
+before_vram = 0x15063A80
+text = "{ extern void conker_aim_lock_on(uint8_t*, recomp_context*); conker_aim_lock_on(rdram, ctx); }"
+
+# Swap Sticks: func_1512C490 has copied the look-at point and the eye into the view's (+0x2E0, +0x2EC; $s0 the
+# camera); while aiming with the sticks swapped, the view is turned to the aim's direction.
+[[patches.hook]]
+func = "func_1512C490"
+before_vram = 0x1512C640
+text = "{ extern void conker_look_view(uint8_t*, recomp_context*); conker_look_view(rdram, ctx); }"
+
+# Free camera looking up (host/src/free_camera.cpp): func_1512C490 at 0x1512C844, about to build the view from its
+# copies of the eye ($sp+0xEC) and the look-at point ($sp+0xE0): tilted up past where the eye stops, the copy of the
+# look-at point is turned up about the eye.
+[[patches.hook]]
+func = "func_1512C490"
+before_vram = 0x1512C844
+text = "{ extern void conker_mouse_camera_view(uint8_t*, recomp_context*); conker_mouse_camera_view(rdram, ctx); }"
+

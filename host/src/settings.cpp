@@ -54,7 +54,10 @@ namespace {
         const std::string screen_filter = "conker_screen_filter";
         const std::string shading = "conker_shading";
         const std::string show_fps = "show_fps"; // (fps_counter.cpp)
+        const std::string conker_detail = "conker_detail"; // (model_detail.cpp)
     }
+    enum class ConkerDetail : uint32_t { AlwaysHighest, Original };
+    std::atomic<bool> conker_detail_highest{ true };
     enum class TextureFilter : uint32_t { N64, Smooth };
     enum class Upscale2D : uint32_t { Original, ScaledOnly, All };
     enum class ScreenFilter : uint32_t { Sharp, Smooth };
@@ -116,6 +119,18 @@ namespace {
             "<br /><recomp-color primary>Game</recomp-color> is the frames the game itself makes, up to 30: a drop there with FPS "
             "steady is the game's own slowdown, as on the N64.",
             { { 0u, "Off", "Off" }, { 1u, "On", "On" } }, 0u);
+        graphics.add_enum_option(extra::conker_detail, "Conker's Detail",
+            "Characters have a few models, from the most detailed down, and the game picks one by how far the "
+            "camera is, and whether they're moving."
+            "<br /><recomp-color primary>Always Highest</recomp-color>: Conker stays on his most detailed model, so it no "
+            "longer swaps as the camera pulls back or as he starts and stops walking. Multiplayer is left as it was."
+            "<br /><recomp-color primary>Original</recomp-color>: the game picks, as on the N64.",
+            { { ConkerDetail::AlwaysHighest, "AlwaysHighest", "Always Highest" }, { ConkerDetail::Original, "Original", "Original" } },
+            ConkerDetail::AlwaysHighest);
+        graphics.add_option_change_callback(extra::conker_detail,
+            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                conker_detail_highest = (ConkerDetail)std::get<uint32_t>(cur) == ConkerDetail::AlwaysHighest;
+            });
         graphics.add_option_change_callback(extra::shading,
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
                 rt64_conker_smooth_shading = (Shading)std::get<uint32_t>(cur) == Shading::Smooth ? 1 : 0;
@@ -137,7 +152,8 @@ namespace {
     // 30 fps, native resolution, no smoothing of edges, N64 texture filtering, the full intro, the
     // game's own camera and field of view, no mouse, no air meter). Modern: widescreen, the display's
     // frame rate, the window's resolution, 4x anti-aliasing, smooth textures, 2D and shading, straight to
-    // the save menu, the free camera, the mouse turning the camera and aiming directly, and the air meter. Settings that
+    // the save menu, the free camera, the mouse turning the camera and aiming directly, twin-stick aiming (Swap Sticks,
+    // Move While Shooting), Ledge Grab, the Longer Tail Spin and the air meter. Settings that
     // are about the player's hands or controller (invert, turning speed, rumble, gyro) are left alone.
     enum class Tab { Graphics, Conker, Accessibility, General };
     struct PresetSetting {
@@ -159,6 +175,7 @@ namespace {
                 { Tab::Graphics, extra::texture_filter, e(TextureFilter::N64), e(TextureFilter::Smooth) },
                 { Tab::Graphics, extra::upscale_2d, e(Upscale2D::Original), e(Upscale2D::All) },
                 { Tab::Graphics, extra::shading, e(Shading::Original), e(Shading::Smooth) },
+                { Tab::Graphics, extra::conker_detail, e(ConkerDetail::Original), e(ConkerDetail::AlwaysHighest) },
                 // Only matters below the window's resolution, as in Classic.
                 { Tab::Graphics, extra::screen_filter, e(ScreenFilter::Sharp), std::nullopt },
                 { Tab::Conker, "skip_intro", V{ false }, V{ true } },
@@ -171,10 +188,17 @@ namespace {
                 { Tab::General, "look_mouse_response", e(0u /* Smooth */), e(1u /* Direct */) },
                 // The original's air face only, or a bar under it too.
                 { Tab::Accessibility, "air_meter", V{ false }, V{ true } },
+                // Conker's moves as on the N64, or catching edges and a longer hover with his tail.
+                { Tab::Accessibility, "ledge_grab", V{ false }, V{ true } },
+                { Tab::Accessibility, "longer_tail_spin", V{ false }, V{ true } },
                 // The original's view; Modern leaves it to the player.
                 { Tab::General, "camera_field_of_view_degrees", V{ 50.0 }, std::nullopt },
                 // The N64 buttons, or (as modern games do) the keys and mouse buttons while you play with them.
                 { Tab::General, "button_prompts", e(conker::ButtonPrompts::Controller), e(conker::ButtonPrompts::Automatic) },
+                // Aiming as on the N64 (the stick aims, a shot stops Conker), or twin-stick: the right stick aims, the
+                // left moves, and he walks as he fires.
+                { Tab::General, "aim_swap_sticks", e(0u /* Off */), e(1u /* On */) },
+                { Tab::General, "aim_move_while_shooting", e(0u /* Off */), e(1u /* On */) },
             };
             return list;
         }();
@@ -288,9 +312,10 @@ namespace {
             });
         conker.add_bool_option(
             "aiming_crosshair", "Aiming Crosshair",
-            "Shows a <recomp-color primary>red dot</recomp-color> where a throw will land while Conker aims (knives, throwables, the magnum). It "
-            "stays hidden when you just look around with R, and during cutscenes. The sniper scope keeps its own "
-            "crosshair; the original game has none elsewhere.",
+            "Shows a <recomp-color primary>red dot</recomp-color> in the middle of the screen while Conker aims a gun that shoots "
+            "straight (the shotgun, the magnum), where the shot goes. Not for thrown things (the knives, the slingshot): they "
+            "fly in an arc, so no one spot is right at every distance. It stays hidden when you just look around with R, and "
+            "during cutscenes. The sniper scope keeps its own crosshair; the original game has none elsewhere.",
             true);
         conker.add_option_change_callback("aiming_crosshair",
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
@@ -553,6 +578,10 @@ bool conker::crosshair::enabled() {
 bool conker::skip_intro() {
     static const bool forced = std::getenv("CONKER_SKIP_INTRO") != nullptr;
     return skip_intro_enabled || forced;
+}
+
+bool conker::model_detail::always_highest() {
+    return conker_detail_highest.load();
 }
 
 bool conker::fps_counter::enabled() {

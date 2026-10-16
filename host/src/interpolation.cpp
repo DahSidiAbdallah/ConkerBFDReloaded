@@ -1,5 +1,6 @@
 // From CBFD-Recompiled (Copyright (c) 2026 Sean Ciaschi, MIT License; see
-// recomp/THIRD_PARTY_LICENSE), used unchanged except for this note.
+// recomp/THIRD_PARTY_LICENSE), used unchanged except for this note, with its V0.1.6 fixes
+// (Conker's snapping, shadows growing, issue #76; a shadow's first frame back, #75).
 
 // Frame interpolation help, called from hooks in conker.toml.
 //
@@ -10,16 +11,32 @@
 // object (from gObjects) into a display list: its commands are wrapped in an RT64
 // matrix group whose ID names the object, with linear ordering, so the n-th matrix
 // of an object is always paired with the n-th of the same object last frame. An
-// object whose count of matrices changed isn't paired at all for that frame (RT64).
+// object whose count of matrices changed (a character's mesh is drawn in chunks, one
+// bone's matrix each, cut differently as its animation changes) has each matrix paired
+// with last frame's closest instead, its vertices left as they are (rt64.patch,
+// GameFrame::alignTransforms; pairing none of them made Conker snap, issue #76).
 //
 // A character's shadow (func_15186794) is the ground under it, clipped anew every
 // frame and drawn with the shadow's texture projected onto it: its own group asks RT64
 // to interpolate its texture coordinates from last frame's projection (rt64.patch),
 // so the shadow slides with the character instead of stepping at the game's rate.
+// The silhouette in the shadow's texture is drawn from a camera the game aims at the character
+// anew every frame, its distance and zoom changing together; RT64 interpolates that camera whole
+// (rt64.patch, ProjectionProcessor), as taken apart and put together halfway it drew the shadow
+// larger (issue #76).
+//
+// A shadow isn't drawn on the first game frame it's back after frames without it (issue
+// #75). Walking into a room, the game draws no shadow while the room loads, then for
+// one frame lays the shadow from where Conker was before the room switched over onto
+// the new room's ground: a big dark patch. Anywhere else a shadow shows up a frame
+// late, 1/30 of a second, after a cutscene or a load.
 
 #include <cstdint>
+#include <unordered_map>
 
 #include "recomp.h"
+
+#include "conker.hpp"
 
 namespace {
     // RT64's extended GBI (tools/rt64/include/rt64_extended_gbi.h) for F3DEX2,
@@ -74,6 +91,17 @@ namespace {
     void put_pop(uint8_t* rdram, gpr& dl) {
         put_command(rdram, dl, (rt64_extended_opcode << 24) | g_ex_popmatrixgroup_v1, 1);
     }
+
+    // Game frames so far (conker::shadows::game_frame), and the last one each shadow (by its
+    // index) was drawn in. The shadow being drawn: its index, and where its commands start.
+    uint32_t game_frames = 0;
+    std::unordered_map<uint32_t, uint32_t> shadow_last_drawn;
+    uint32_t shadow_index = 0;
+    gpr shadow_dl_start = 0;
+}
+
+void conker::shadows::game_frame() {
+    game_frames++;
 }
 
 // func_1502CCFC, after its first instruction (the stack frame): $a0 is where it
@@ -101,12 +129,23 @@ extern "C" void conker_object_matrix_group_end(uint8_t* rdram, recomp_context* c
 extern "C" void conker_shadow_matrix_group_begin(uint8_t* rdram, recomp_context* ctx) {
     const uint32_t shadow = (uint32_t)ctx->r5 & 0xFFFF;
     gpr dl = ctx->r4;
+    shadow_index = shadow;
+    shadow_dl_start = dl;
     put_group(rdram, dl, 0x53480000u | shadow, shadow_group_params);
     ctx->r4 = dl;
 }
 
-// At its return: $v0 is the end of what it wrote.
+// At its return: $v0 is the end of what it wrote. A shadow not drawn last game frame isn't
+// drawn in this one either (see the top): handing back where its commands started drops
+// everything it wrote, the group's commands too.
 extern "C" void conker_shadow_matrix_group_end(uint8_t* rdram, recomp_context* ctx) {
+    const auto last = shadow_last_drawn.find(shadow_index);
+    const bool back_after_gap = last == shadow_last_drawn.end() || game_frames - last->second > 1;
+    shadow_last_drawn[shadow_index] = game_frames;
+    if (back_after_gap) {
+        ctx->r2 = shadow_dl_start;
+        return;
+    }
     gpr dl = ctx->r2;
     put_pop(rdram, dl);
     ctx->r2 = dl;

@@ -52,10 +52,11 @@ with `./ConkerBFDReloaded --rom /path/to/conker.z64`. It's remembered after that
 camera and field of view, the original lighting and shading. You get the higher resolution and
 nothing else changes.
 
-**Modern** turns on widescreen, the smooth frame rate, sharper 2D graphics, smooth shading, the
-free camera, the aiming crosshair, the autosave icon, hold-to-skip cutscenes,
-pausing when you alt-tab, Skip Intro, direct mouse aiming, the air meter, and button prompts that
-show your keys and mouse buttons when you play with them.
+**Modern** turns on widescreen, the smooth frame rate, sharper 2D graphics, smooth shading,
+Conker on his most detailed model at any distance, the free camera, the aiming crosshair, the
+autosave icon, hold-to-skip cutscenes, pausing when you alt-tab, Skip Intro, direct mouse aiming,
+twin-stick aiming (Swap Sticks and Move While Shooting), Ledge Grab, the Longer Tail Spin, the air
+meter, and button prompts that show your keys and mouse buttons when you play with them.
 
 While Classic or Modern is picked, the settings it decides are greyed out. Pick **Custom** to
 change any of them yourself.
@@ -79,9 +80,16 @@ change any of them yourself.
   Now you can.
 - **Skip Intro.** Straight to the bar menu in a couple of seconds.
 - **Classic / Modern / Custom presets**, as described above.
-- **Aiming crosshair.** A red dot shows where a throw will land when Conker aims (the knives in
-  the barn, throwables, the magnum). It's lined up with where the game actually throws, and it
-  stays out of the way when you just hold R to look around. The original has none.
+- **Aiming crosshair.** A red dot in the middle of the screen while Conker aims a gun that shoots
+  straight (the shotgun, the magnum), right where the shot goes. It stays out of the way when you
+  just hold R to look around, and for thrown things (the knives, the slingshot), which fly in an arc
+  so no single spot is right at every distance. The original has none.
+- **Move While Shooting.** With the shotgun, Conker keeps walking as he fires, where on the N64 every
+  shot stopped him for a second. With Swap Sticks as well (see below), you aim with the right stick
+  and move with the left the whole time: proper twin-stick shooting. (Aiming: Move While Shooting on
+  the General tab.)
+- **A new launcher.** A GTA-style collage of the game's best moments, one from each chapter, that
+  flies together with the logo as the launcher opens.
 - **Autosave icon.** A little Conker head in the corner while the game saves, like modern games.
 - **Show Cash.** Your cash on screen during play, drawn exactly like the pause screen's (the wad of
   bills with eyes and the gold numbers), in the top-right corner. It counts up or down with a little
@@ -91,9 +99,11 @@ change any of them yourself.
 - **Free camera.** Turn the camera with the right stick, or the mouse too (Free Camera on the
   General tab), and it stays where you put it. It doesn't go through walls, posts or the floor:
   where there's no room it comes in toward Conker (or, in a tight bend, turns aside to where there
-  is), and it glides back out when there's space.
-  Tilted down, it settles just above the ground. Walking up or down a slope, it tilts a little with
-  the slope so you can see where you're going.
+  is), and it glides back out when there's space. Next to things it can't see coming, like a crate
+  you're pushing, it holds still instead of jumping in and out.
+  Tilted down, it settles just above the ground, and tilting further looks up past Conker. Walking
+  up or down a slope, it tilts a little with the slope so you can see where you're going. Click the
+  right stick to switch between near, middle and far.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,
   walk instead of run with L, catch the edge when you walk off something high or come up short on a
   jump, swim up by pushing up
@@ -102,11 +112,14 @@ change any of them yourself.
 - **Clean menu pictures.** Buttons and titles in the menus are made of small pieces, and at high
   resolutions you could see thin lines where they met (PLAY, PAUSED and so on). They're joined
   smoothly now.
-- **Works with the uncensored ROM hack.** ROM hacks that only change the game's data, like the
-  uncensored speech, are accepted. Pick one with the **ROM** option in the launcher, which also shows
-  which one you're playing (Original, Uncensored or French) and switches back any time.
-- **Plays in French.** Works with the French translation by Corrigo and Djipi (see
-  [Playing in French](#playing-in-french) below).
+- **Works with the uncensored ROM hack and translations.** ROM hacks that keep the game's code and
+  only change its data, like the uncensored speech or a translation, are accepted. Pick one with the
+  **ROM** option in the launcher, which also shows which one you're playing (Original, Uncensored,
+  French, German or Russian) and switches back any time.
+- **Plays in French and German.** Works with the French translation by Corrigo and Djipi (see
+  [Playing in French](#playing-in-french) below) and with the
+  [German translation](https://github.com/niehoff90/ConkerDeutschMod) (patch your US ROM with it; turn
+  the HD Icons pack off, as it would cover the German pictures with English ones).
 - **Keyboard and mouse button prompts.** Playing with the keyboard and mouse, the button pictures in
   the speech bubbles show the keys and mouse buttons you've actually bound (SPACE, a mouse with its
   button lit up, WASD for the stick...), and so does the pause and save menus' stick. They're sharp
@@ -124,10 +137,15 @@ feels off, please [open an issue](../../issues). That's exactly the feedback I'm
 - **Smooth shading.** Lighting worked out per pixel instead of per corner, so torch light looks
   round and soft. I checked that it matches the original's brightness in the areas I tested,
   but not across the whole game.
-- **The crosshair with other weapons.** It's lined up and tested with the knives in the barn, where
-  it sits a little above the middle (the knives fly in an arc). Everywhere else it sits in the middle
-  of the screen, where straight shots like the laser gun in the Count's attic land, but I haven't
-  checked that in the game yet.
+- **The Overhaul of the Aiming Crosshair.** Tested with the shotgun. The game also uses the same
+  aiming for some thrown things; if you ever see the dot while throwing, please tell me where.
+- **Move While Shooting.** The shotgun only for now, and tested without Swap Sticks (my test setup
+  can't swap real sticks). While he walks and fires, his legs keep the shooting pose for half a
+  second: the game has no walk-and-shoot animation.
+- **Ledge Grab.** Now on in Modern. It no longer catches the sides of slopes, but see the known
+  issues below.
+- **The German and Russian translations.** German is tested with the intro and the speech bubbles.
+  The Russian translation is recognised (as CBFD-Recompiled does) but I haven't had its patch to test.
 - **The camera tilting on slopes.** Tested on gentle slopes and with made-up steep ones, not yet on
   a really steep hill.
 - **Light glows near the screen edges.** In widescreen they used to vanish toward the sides; they
@@ -161,7 +179,9 @@ support for N64 controllers and adapters (raphnet, Mayflash, Hyperkin, the Switc
 controller, the 8BitDo 64), multiple controllers for multiplayer, binding mouse buttons, and a long
 list of fixes (the sky crash on wide screens, doors clipping in widescreen, the drunk-effect smear,
 cutscene camera cuts, speech bubbles, light glows, the wrong music playing after a game over or in
-the stone dragon's mouth, and more). Files taken from their project say so at the top.
+the stone dragon's mouth, and more). From their 0.1.6: Swap Sticks (aim with the right stick, move with the left), the Lock-On
+switch, Conker's Detail (keeping Conker on his most detailed model), and fixes for crashes in busy
+scenes, Conker's shadow and the drunk blur. Files taken from their project say so at the top.
 
 ## HD Icons texture pack
 
@@ -262,6 +282,8 @@ None of this would exist without the people whose work it's built on:
 - **[N64Recomp, N64ModernRuntime and RecompFrontend](https://github.com/N64Recomp)** by Wiseguy
   and contributors.
 - **[RT64](https://github.com/rt64/rt64)** by Darío and contributors, the renderer.
+- The launcher's collage uses some N64 screenshots from the [Conker Wiki](https://conker.fandom.com/)
+  alongside my own captures.
 - **[GameBeast92's 4K Ultimate Texture Pack](https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k-Ultimate-Texture-Pack)**
   (CC BY 4.0), the textures behind the optional HD Icons pack.
 - **Corrigo** and **Djipi** ([emulation64.fr](http://www.emulation64.fr/)) for the French

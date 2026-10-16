@@ -66,6 +66,13 @@ namespace conker {
     namespace look_aim {
         void add_options(recomp::config::Config& config);
         void on_input_poll();
+        // Aiming: Swap Sticks: whether a player (0 to 3) is aiming now with the setting on, so their controller's
+        // sticks are swapped (frontend.cpp): the right stick aims and the left moves.
+        bool swap_sticks_now(int player = 0);
+        // Whether the player's character is aiming the shotgun, where Z makes C-Left and C-Right turn the aim.
+        bool z_turns_aim(int player);
+        // Aiming: Move While Shooting (move_shoot.cpp).
+        bool move_while_shooting();
     }
 
     // settings.cpp: the settings tabs.
@@ -93,6 +100,8 @@ namespace conker {
     void key_prompts_write_pictures(const std::filesystem::path& dir); // testing
     // free_camera.cpp: the right stick for the Free Camera (x right, y up, past the dead zone).
     void free_camera_stick(float* x, float* y);
+    // free_camera.cpp: testing (F9 with capture_enabled): the free camera's last frames, as text.
+    void free_camera_write_history(const std::filesystem::path& path);
     // scene_fixes.cpp: Skip Intro's steps.
     void skip_intro_on_vi(uint8_t* rdram);
     bool skip_intro_pressing_start();
@@ -114,9 +123,8 @@ namespace conker {
         bool enabled();
         // look_aim.cpp, each frame of the second aiming mode (player 1): zoomed in (the sniper scope) or not.
         void aiming(bool zoomed);
-        // look_aim.cpp, each frame of the look mode (player 1): shown unless the player holds R.
-        // vertical_fov: the camera's vertical field of view in use, in degrees.
-        void look_mode(float vertical_fov, uint8_t kind, uint32_t room);
+        // look_aim.cpp, each frame of the look mode (player 1), with its kind (the camera's +0x23E): shown for the shotgun.
+        void look_mode(uint8_t kind);
         // frontend.cpp: player 1's buttons this frame (R held or not).
         void set_buttons(uint16_t buttons);
         // From the launcher's init (frontend.cpp): recompui's UI exists now.
@@ -156,6 +164,21 @@ namespace conker {
     }
 
     // fps_counter.cpp: Show FPS, the frame rate counter (from CBFD-Recompiled V0.1.5).
+    // Graphics: Conker's Detail (settings.cpp; the model is picked in model_detail.cpp).
+    namespace model_detail {
+        // Always Highest: Conker stays on his most detailed model in single player.
+        bool always_highest();
+    }
+
+    // widescreen.cpp: the motion blur is drawn this frame (qol.cpp), so no frames are drawn between it and the next.
+    void motion_blur_drawn();
+
+    // interpolation.cpp: shadows aren't drawn on their first game frame back after a gap.
+    namespace shadows {
+        // From the game thread, as the game starts a frame's display list.
+        void game_frame();
+    }
+
     namespace fps_counter {
         // settings.cpp: whether the setting is on.
         bool enabled();

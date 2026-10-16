@@ -27,6 +27,9 @@
 // The mouse and gyro are player 1's only: in multiplayer both modes run for each player's camera.
 
 #include <algorithm>
+#include <vector>
+#include <chrono>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -98,6 +101,32 @@ namespace {
     float aim_units_per_degree = 0.0f;
     float aim_remainder = 0.0f;
 
+    // From CBFD-Recompiled V0.1.6 (MIT): Aiming: Swap Sticks. When each player's camera (by its player,
+    // +0x23D) last ran either aiming mode, from the game thread (steady clock ticks), for the input thread
+    // (swap_sticks_now): it counts as aiming a little over two game frames after, so a frame the game takes
+    // longer over doesn't swap the sticks back for a poll.
+    constexpr int aim_players = 4;
+    std::atomic<int64_t> last_aim_ticks[aim_players] = {};
+    // The aim's yaw for each player's view this frame, from the look mode (conker_look_currents), while swapped.
+    float swap_view_yaw[aim_players] = {};
+    bool swap_view_yaw_set[aim_players] = {};
+    constexpr auto aim_linger = std::chrono::milliseconds(80);
+    int camera_player(uint8_t* rdram, gpr camera) {
+        const int player = (int)MEM_BU(0x23D, camera);
+        return (player < aim_players) ? player : -1;
+    }
+    // Whether each player's character is in the shotgun's aiming state (0x3B, +0x4 of the camera's +0x3D0), where
+    // Z (the laser sight) makes C-Left and C-Right turn the aim, for the input thread (z_turns_aim).
+    constexpr uint8_t shotgun_aim_state = 0x3B;
+    std::atomic<bool> shotgun_aiming[aim_players] = {};
+    void note_aiming(uint8_t* rdram, gpr camera, int player) {
+        if (player >= 0 && player < aim_players) {
+            last_aim_ticks[player] = std::chrono::steady_clock::now().time_since_epoch().count();
+            const gpr character = (gpr)(int32_t)MEM_W(0x3D0, camera);
+            shotgun_aiming[player] = (((uint32_t)character & 0xFF000000u) == 0x80000000u) && (MEM_BU(0x4, character) == shotgun_aim_state);
+        }
+    }
+
 #if defined(CONKER_RT64)
     namespace options {
         const std::string stick_response = "look_stick_response";
@@ -110,9 +139,15 @@ namespace {
         const std::string camera_turn_speed = "camera_turn_speed";
         // From CBFD-Recompiled V0.1.5 (same ids, so their settings carry over):
         const std::string camera_fov = "camera_field_of_view_degrees";
+        // From CBFD-Recompiled V0.1.6 (same ids):
+        const std::string aim_swap_sticks = "aim_swap_sticks";
+        const std::string aim_lock_on = "aim_lock_on";
+        // Ours (move_shoot.cpp):
+        const std::string aim_move_while_shooting = "aim_move_while_shooting";
     }
 
     enum class Response : uint32_t { Smooth, Direct };
+    enum class Toggle : uint32_t { Off, On };
     enum class Invert : uint32_t { None, X, Y, Both };
 
     template <typename T>
@@ -204,6 +239,122 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
     config.add_enum_option(options::gyro_invert, "Gyro: Invert Aiming",
         "Inverts gyro in R-Look (hold R and look around) and the second aiming mode (e.g. the sniper scope), separately from the stick and the mouse. With <recomp-color primary>None</recomp-color>, the view turns the way the controller is turned.",
         invert, Invert::None);
+    static const std::vector<recomp::config::ConfigOptionEnumOption> toggle = {
+        { Toggle::Off, "Off", "Off" }, { Toggle::On, "On", "On" },
+    };
+    config.add_enum_option(options::aim_swap_sticks, "Aiming: Swap Sticks",
+        "Aim like a third-person shooter: while you aim (the shotgun, the slingshot, the sniper scope, R-Look...), the "
+        "right stick aims and the left stick moves, in single player. Conker keeps facing where you aim and walks the way "
+        "you push, sideways and back too (his legs play the walk forward: the game has no sidestep). With the mouse, the "
+        "keys bound to the stick (W, A, S, D) move. With the shotgun, holding R alone shows the laser sight, so you can "
+        "move with it; holding Z as well, the left stick only moves forward and back, as Z makes C-Left and C-Right turn "
+        "the aim. Back to normal once you stop aiming."
+        "<br /><recomp-color primary>Off</recomp-color>: as in the original, where the stick aims and the C-buttons move.",
+        toggle, Toggle::Off);
+    config.add_enum_option(options::aim_lock_on, "Aiming: Lock-On",
+        "Whether aiming locks on to enemies, as with the shotgun once the zombies come: the game turns your aim (and the "
+        "camera with it) toward one, whatever the stick does. <recomp-color primary>On</recomp-color> is the original. "
+        "Off leaves the aim to you.",
+        toggle, Toggle::On);
+    config.add_enum_option(options::aim_move_while_shooting, "Aiming: Move While Shooting",
+        "With the shotgun, Conker keeps walking as he fires, in single player, where in the original each shot stopped "
+        "him for a second. He still waits as long between shots. With Swap Sticks as well, you aim with the right "
+        "stick and move with the left the whole time, twin-stick style. (Experimental: the shotgun only so far.)"
+        "<br /><recomp-color primary>Off</recomp-color>: as in the original.",
+        toggle, Toggle::Off);
+}
+
+bool conker::look_aim::move_while_shooting() {
+    return option<Toggle>(options::aim_move_while_shooting) == Toggle::On;
+}
+
+// From CBFD-Recompiled V0.1.6 (MIT): Aiming: Lock-On. func_15063A38 turns the aim (+0x12 of $a0's +0x31C, an s16)
+// by the stick's X each frame. While +0x84 of that struct is set (an enemy to lock on to: the shotgun's zombies),
+// it calls func_150639BC instead, which turns the aim straight toward the target, whatever the stick does. At
+// 0x15063A80, $t1 holds that flag, about to be tested: with the setting Off it reads as clear.
+extern "C" void conker_aim_lock_on(uint8_t* rdram, recomp_context* ctx) {
+    if (option<Toggle>(options::aim_lock_on) == Toggle::Off) {
+        ctx->r9 = 0;
+    }
+}
+
+// From CBFD-Recompiled V0.1.6 (MIT): Aiming: Swap Sticks with the shotgun: holding R alone shows the laser sight,
+// and Conker walks with the gun up, as R and Z do. In his state 0x3B (aiming the shotgun), Z held shows the laser
+// but also makes C-Left and C-Right turn the aim, so he can't strafe with it; R alone aims while he walks and
+// strafes, without it. With R and Z: +0x8A of his +0x31C has 0x20 (the laser's sound and light); D_800CC2B0 is
+// set (func_15019130 runs the laser's update only while it is); +0x1B4 of +0x31C has 4 (the beam's update); and he
+// walks with 0x31B, which keeps the gun up, where R alone's walk is 0x224.
+namespace {
+    // Player 1 aiming with R and not Z, the sticks swapped (single player: D_800CC290 is theirs).
+    bool shotgun_laser_on_r(uint8_t* rdram) {
+        if (!conker::look_aim::swap_sticks_now(0)) {
+            return false;
+        }
+        const uint32_t held = (uint32_t)MEM_W(0, (gpr)(int32_t)0x800CC290);
+        return (held & 0x10) && !(held & 0x2000);
+    }
+
+    void show_shotgun_laser(uint8_t* rdram, gpr conker) {
+        if (!shotgun_laser_on_r(rdram)) {
+            return;
+        }
+        const gpr state = (gpr)(int32_t)MEM_W(0x31C, conker);
+        MEM_B(0x8A, state) = (int8_t)(MEM_BU(0x8A, state) | 0x20);
+        MEM_B(0, (gpr)(int32_t)0x800CC2B0) = 1;
+        MEM_B(0x1B4, state) = (int8_t)(MEM_BU(0x1B4, state) | 4);
+    }
+}
+
+// After R alone's movement in the shotgun's state (func_15063E84 returned, at 0x15069028; $s0 Conker).
+extern "C" void conker_shotgun_laser(uint8_t* rdram, recomp_context* ctx) {
+    show_shotgun_laser(rdram, ctx->r16);
+}
+
+// R alone's walk, picked in func_15064B94 ($v1 at 0x150651FC): 0x224 becomes R and Z's 0x31B.
+extern "C" void conker_shotgun_laser_walk(uint8_t* rdram, recomp_context* ctx) {
+    if (shotgun_laser_on_r(rdram) && (uint32_t)ctx->r3 == 0x224) {
+        ctx->r3 = 0x31B;
+    }
+}
+
+// From CBFD-Recompiled V0.1.6 (MIT): the view looks the way the aim does while the sticks are swapped.
+// func_1512C490 (building the view) has just copied the look-at point and the eye into the view's (+0x2E0, and
+// +0x2EC from +0x2F8; $s0 the camera, before 0x1512C640). Walking with the left stick, the line between them
+// swung and the view turned with the stick: the look-at point is turned about the eye to the aim's direction
+// across the ground (the view's yaw is 270 degrees less the look mode's, +0x37C). Its distance and height stay.
+extern "C" void conker_look_view(uint8_t* rdram, recomp_context* ctx) {
+    const gpr camera = ctx->r16;
+    const int player = camera_player(rdram, camera);
+    if (!conker::look_aim::swap_sticks_now(player)) {
+        return;
+    }
+    const float ex = read_float(rdram, camera, 0x2F8), ez = read_float(rdram, camera, 0x300);
+    const float dx = read_float(rdram, camera, 0x2E0) - ex, dz = read_float(rdram, camera, 0x2E8) - ez;
+    const float across = std::sqrt(dx * dx + dz * dz);
+    if (across < 1.0f) {
+        return;
+    }
+    constexpr float degrees_to_radians = 3.14159265358979f / 180.0f;
+    const float aim_yaw = swap_view_yaw_set[player] ? swap_view_yaw[player] : read_float(rdram, camera, current_yaw);
+    swap_view_yaw_set[player] = false;
+    const float yaw = (270.0f - aim_yaw) * degrees_to_radians;
+    write_float(rdram, camera, 0x2E0, ex + std::cos(yaw) * across);
+    write_float(rdram, camera, 0x2E8, ez + std::sin(yaw) * across);
+}
+
+bool conker::look_aim::swap_sticks_now(int player) {
+    if (option<Toggle>(options::aim_swap_sticks) != Toggle::On || !recompinput::players::is_single_player_mode()) {
+        return false;
+    }
+    if (player < 0 || player >= aim_players) {
+        return false;
+    }
+    const int64_t since = std::chrono::steady_clock::now().time_since_epoch().count() - last_aim_ticks[player].load();
+    return since >= 0 && std::chrono::steady_clock::duration(since) < aim_linger;
+}
+
+bool conker::look_aim::z_turns_aim(int player) {
+    return (player >= 0) && (player < aim_players) && shotgun_aiming[player].load();
 }
 #endif
 
@@ -348,6 +499,8 @@ extern "C" void conker_aim_stick(uint8_t* rdram, recomp_context* ctx) {
     }
 
     const gpr camera = ctx->r16;
+    // Aiming: Swap Sticks: this camera's player is aiming.
+    note_aiming(rdram, camera, camera_player(rdram, camera));
     if (!is_player_one(rdram, camera)) {
         return;
     }
@@ -388,6 +541,36 @@ extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
     const float units_per_degree = aim_units_per_degree;
     aim_units_per_degree = 0.0f;
 #if defined(CONKER_RT64)
+    // Aiming: Swap Sticks: this camera's player is aiming (the look mode, R-Look too: the stick aims, not moves).
+    note_aiming(rdram, ctx->r16, camera_player(rdram, ctx->r16));
+    if (is_player_one(rdram, ctx->r16)) {
+        show_shotgun_laser(rdram, (gpr)(int32_t)MEM_W(0x3D0, ctx->r16));
+    }
+    // From CBFD-Recompiled V0.1.6 (MIT): Swap Sticks moves Conker like a shooter's character: he keeps facing where
+    // the view looks, so the aim stays on the crosshair, and walks the way the left stick (or W, A, S, D) points from
+    // the view's forward: forward, back, sideways or between. The view's yaw is his facing (+0x7A of +0x3D0) less the
+    // aiming angle (+0x12 of +0x3D4, times 0.35 on the scaled path). Each frame the whole angle goes into his facing,
+    // and his moving angle (+0x76), which the game walks him along, is set to the way pressed. Left to the game, he
+    // turned his body toward the way he walked, the aim making up the difference only up to about 49 degrees.
+    if ((units_per_degree != 0.0f) && conker::look_aim::swap_sticks_now(camera_player(rdram, ctx->r16))) {
+        constexpr uint32_t c_up = 0x0008, c_down = 0x0004, c_left = 0x0002, c_right = 0x0001;
+        const uint32_t held = (uint32_t)MEM_HU(0, (gpr)(int32_t)MEM_W(0x36C, ctx->r16));
+        const int dx = ((held & c_right) ? 1 : 0) - ((held & c_left) ? 1 : 0);
+        const int dy = ((held & c_up) ? 1 : 0) - ((held & c_down) ? 1 : 0);
+        if (dx != 0 || dy != 0) {
+            const int32_t offset = (int32_t)std::lround(std::atan2(-(double)dx, (double)dy) * 32768.0 / 3.14159265358979);
+            const gpr aim = (gpr)(int32_t)MEM_W(0x3D4, ctx->r16);
+            const gpr conker = (gpr)(int32_t)MEM_W(0x3D0, ctx->r16);
+            const double facing_per_angle = (65536.0 / 360.0) / units_per_degree;
+            const int32_t angle = (int32_t)MEM_H(0x12, aim);
+            const uint16_t view = (uint16_t)((uint32_t)MEM_HU(0x7A, conker) - (uint32_t)std::lround(angle * facing_per_angle));
+            const uint16_t moving = (uint16_t)((uint32_t)view + (uint32_t)offset);
+            MEM_H(0x7A, conker) = (int16_t)view;
+            MEM_H(0x12, aim) = 0;
+            MEM_H(0x76, conker) = (int16_t)moving;
+            aim_remainder = 0.0f;
+        }
+    }
     // Directions, all measured by playing: the yaw grows to the left and the pitch downward (the
     // game's stick is inverted: up looks down). The mouse's x grows to the right and its y
     // downward. recompinput's gyro gives the controller's turn on y (positive turning left) and
@@ -396,26 +579,8 @@ extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
     if (!is_player_one(rdram, ctx->r16)) {
         return;
     }
-    // Aiming Crosshair (crosshair.cpp): the look mode, which the game also puts Conker in to throw
-    // (the knives in the barn); only then, not while the player holds R to look around. The look mode
-    // also runs while the camera stays well back from Conker (hypnotising the raptor in Uga Buga:
-    // about 450 away; looking or aiming, it's just over his shoulder, about 90): no dot then.
-    {
-        const gpr view = (gpr)(int32_t)((uint32_t)MEM_W(0, (gpr)(int32_t)0x800BE628) + MEM_BU(0x23D, ctx->r16) * 0x180);
-        gpr camera = (gpr)(int32_t)MEM_W(0, (gpr)(int32_t)0x800DBFF0);
-        if (((uint32_t)camera & 0xFF000000u) != 0x80000000u) {
-            camera = 0;
-        }
-        constexpr gpr player = (gpr)(int32_t)0x800CC2D0;
-        const float dx = camera ? read_float(rdram, camera, 0x2F8) - read_float(rdram, player, 0x14) : 1e9f;
-        const float dz = camera ? read_float(rdram, camera, 0x300) - read_float(rdram, player, 0x1C) : 1e9f;
-        if (dx * dx + dz * dz < 200.0f * 200.0f) {
-            // The vertical field of view in use, and which kind of look it is (+0x23E, func_15120158 picks
-            // its settings by it): the knives' throws arc, other aims (the guns) fly straight.
-            conker::crosshair::look_mode(read_float(rdram, view, 0x78), (uint8_t)MEM_BU(0x23E, ctx->r16),
-                (uint32_t)MEM_W(0, (gpr)(int32_t)0x800BE9F0)); // and the room
-        }
-    }
+    // Aiming Crosshair (crosshair.cpp): the look mode, and its kind, which says what's aimed (if anything).
+    conker::crosshair::look_mode((uint8_t)MEM_BU(0x23E, ctx->r16));
     float mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch;
     if (!take_movement(mouse_yaw, mouse_pitch, gyro_yaw, gyro_pitch)) {
         return;
@@ -433,7 +598,20 @@ extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
         const float units = yaw * units_per_degree + aim_remainder;
         const int32_t whole = (int32_t)units;
         aim_remainder = units - (float)whole;
-        MEM_H(0x12, aim) = (int16_t)(MEM_H(0x12, aim) - whole);
+        // As the stick's turn does (func_15063A38): past +-9000 units the aim stops there and Conker turns by the
+        // rest (his facing, +0x7A, and +0x76 with it), so his body follows (from CBFD-Recompiled V0.1.6): swung
+        // fast, the mouse took the aim past it and his body stayed behind.
+        constexpr int32_t aim_limit = 9000;
+        int32_t angle = (int32_t)MEM_H(0x12, aim) - whole;
+        if (angle < -aim_limit || angle > aim_limit) {
+            const int32_t limit = (angle < 0) ? -aim_limit : aim_limit;
+            const gpr conker = (gpr)(int32_t)MEM_W(0x3D0, ctx->r16);
+            const uint16_t facing = (uint16_t)((uint32_t)MEM_HU(0x7A, conker) - (uint32_t)(angle - limit));
+            MEM_H(0x7A, conker) = (int16_t)facing;
+            MEM_H(0x76, conker) = (int16_t)facing;
+            angle = limit;
+        }
+        MEM_H(0x12, aim) = (int16_t)angle;
     }
     frame.pitch_target_set = read_float(rdram, targets, target_pitch) + pitch;
     write_float(rdram, targets, target_pitch, frame.pitch_target_set);
@@ -453,6 +631,19 @@ extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
 extern "C" void conker_look_currents(uint8_t* rdram, recomp_context* ctx) {
 #if defined(CONKER_RT64)
     const gpr state = ctx->r16, targets = ctx->r8;
+    // From CBFD-Recompiled V0.1.6 (MIT): with Swap Sticks, the view's yaw is the aim's: walking back and to the side
+    // swung the look mode's current yaw off its target and the spring pulled it back, turning the camera with the
+    // left stick. The current yaw is set to the target, and the target kept for the view (conker_look_view).
+    {
+        const int player = camera_player(rdram, state);
+        if (conker::look_aim::swap_sticks_now(player)) {
+            const float yaw = read_float(rdram, targets, target_yaw);
+            write_float(rdram, state, current_yaw, yaw);
+            write_float(rdram, targets, yaw_velocity, 0.0f);
+            swap_view_yaw[player] = yaw;
+            swap_view_yaw_set[player] = true;
+        }
+    }
     if (option<Response>(options::stick_response) == Response::Direct) {
         // The view is where the targets are, and the spring keeps no speed to overshoot with.
         write_float(rdram, state, current_yaw, read_float(rdram, targets, target_yaw));

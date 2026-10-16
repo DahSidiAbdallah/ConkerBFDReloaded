@@ -26,7 +26,7 @@ cp $CFG/saves/conker.n64.us.1.0.bin $CFG/saves/save.abtest # the player's save t
 # outside the barn, room 0x0C). SAVE=name picks another from C:\ConkerRecompWin\emulator_saves
 # (user_2026-09-30.eep: a copy of the player's own save, further on).
 cp $W/emulator_saves/${SAVE:-pj64_2026-08-22.eep} $CFG/saves/conker.n64.us.1.0.bin
-restore() { taskkill.exe /F /IM ConkerBFDReloaded.exe >/dev/null 2>&1; touch $W/skip_intro.flag; mv -f $CFG/saves/save.abtest $CFG/saves/conker.n64.us.1.0.bin; for f in graphics sound conker mods general accessibility; do mv -f $CFG/$f.json.abtest $CFG/$f.json; done; rm -f $W/record.flag $W/music_seqps.txt $W/snap_room.txt $W/log_window.txt $W/test_warp.txt $W/test_place.txt; for f in ${FLAGS:-}; do rm -f $W/$f.flag; done; }
+restore() { taskkill.exe /F /IM ConkerBFDReloaded.exe >/dev/null 2>&1; for f in graphics conker general accessibility; do cp -f $CFG/$f.json $out/settings_$f.json 2>/dev/null; done; touch $W/skip_intro.flag; mv -f $CFG/saves/save.abtest $CFG/saves/conker.n64.us.1.0.bin; for f in graphics sound conker mods general accessibility; do mv -f $CFG/$f.json.abtest $CFG/$f.json; done; rm -f $W/record.flag $W/music_seqps.txt $W/snap_room.txt $W/log_window.txt $W/test_warp.txt $W/test_place.txt $W/test_gun.txt; for f in ${FLAGS:-}; do rm -f $W/$f.flag; done; }
 trap restore EXIT
 trap 'exit 130' INT TERM HUP
 python3 - "$CFG" "$changes" <<'PY'
@@ -60,7 +60,9 @@ rm -f $W/log_window.txt $W/snaps/*.txt $W/snaps/*.rdram; [ -n "${LOG_WINDOW:-}" 
 touch $W/record.flag; rm -f $W/snap_room.txt; [ -n "${SNAP_ROOM:-}" ] && printf "$SNAP_ROOM" > $W/snap_room.txt; rm -f $W/snaps/sound.wav
 # WARP="seconds:room:entrance;..." (room in hex) sends Conker there, PLACE="seconds:x:y:z:facing;..." puts
 # him at a spot (testing.cpp's CONKER_TEST_WARP / CONKER_TEST_PLACE): start tests anywhere.
-rm -f $W/test_warp.txt $W/test_place.txt; [ -n "${WARP:-}" ] && printf "$WARP" > $W/test_warp.txt; [ -n "${PLACE:-}" ] && printf "$PLACE" > $W/test_place.txt
+rm -f $W/test_warp.txt $W/test_place.txt $W/test_gun.txt; [ -n "${WARP:-}" ] && printf "$WARP" > $W/test_warp.txt; [ -n "${PLACE:-}" ] && printf "$PLACE" > $W/test_place.txt
+# GUN="seconds:state" (hex) gives Conker that weapon state then (testing.cpp's CONKER_TEST_GUN; shotgun 3B).
+[ -n "${GUN:-}" ] && printf "$GUN" > $W/test_gun.txt
 printf "${INPUT:-50:1000,54:1000}${EXTRA_INPUT:+,$EXTRA_INPUT}" > $W/input_script.txt
 # With SNAP_ROOM the times are that room's timer (60 a second), not game seconds: run long
 # enough to reach the room (about 60 s in) and the last one, not that many seconds.

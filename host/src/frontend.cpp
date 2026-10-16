@@ -1,12 +1,13 @@
 // The window, the launcher and menus (RecompFrontend's recompui) and remappable
-// input (recompinput). Launcher design: a full-screen poster (assets/poster_bar.png),
-// our logo in the style of the game's box logo on the left (assets/logo.png, rendered in Blender by
-// art/logo_3d.py) and the menu on the right, in orange and cream.
+// input (recompinput). Launcher design: a full-screen collage of the game's moments with the game's logo
+// over the middle, put together as the launcher opens (assets/poster, add_posters), and the menu on the
+// right, in orange and cream.
 
 #include <algorithm>
 #include <array>
 #include <mutex>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -62,49 +63,130 @@ namespace {
     const recompui::Color orange{ 0xF0, 0x7A, 0x1E, 0xFF };
     const recompui::Color cream{ 0xFF, 0xE9, 0xC2, 0xFF };
 
-    // Launcher posters, shown in turn.
-    constexpr const char* poster_files[] = { "poster_bar.png" };
-    constexpr auto poster_time = std::chrono::seconds(12);
-    std::vector<recompui::Image*> posters;
-    size_t current_poster = 0;
-    std::chrono::steady_clock::time_point poster_shown;
+    // The launcher's poster: a collage of the game's moments (real N64 frames) in slanted panels, in the
+    // style of the GTA covers, with the game's own logo over the middle (assets/poster: one picture a
+    // panel, cut to its shape, and layout.txt with where each goes on the 2560x1440 poster, the logo last).
+    // As the launcher opens the panels fly in one after another from outside, then the logo lands on top.
+    struct PosterPiece {
+        recompui::Image* image = nullptr;
+        float dx = 0.0f, dy = 0.0f;   // the way it flies in from (a part of its own size)
+        float delay = 0.0f;           // seconds after the launcher shows
+        bool logo = false;
+        bool shade = false;           // the shade behind the menu: only fades in, with the logo
+    };
+    std::vector<PosterPiece> poster_pieces;
+    bool poster_started = false, poster_done = false;
+    std::chrono::steady_clock::time_point poster_start;
+    constexpr float panel_seconds = 0.6f, panel_step = 0.09f, panels_after = 0.5f; // (the window takes a moment to show)
+    constexpr float logo_seconds = 0.85f, logo_after = 0.35f; // after the last panel starts
 
     void add_posters(recompui::LauncherMenu* menu) {
         recompui::ContextId context = recompui::get_current_context();
         recompui::Element* parent = menu->get_background_container();
-        posters.clear();
-        for (size_t i = 0; i < std::size(poster_files); i++) {
-            std::ifstream file(recompui::file::get_asset_path(poster_files[i]), std::ios::binary);
-            std::vector<char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-            std::printf("[frontend] poster %s: %zu bytes\n", poster_files[i], bytes.size());
-            if (bytes.empty()) {
-                continue;
-            }
-            std::string src = "?/conker/poster" + std::to_string(i);
-            recompui::queue_image_from_bytes_file(src, bytes);
-            recompui::Image* image = context.create_element<recompui::Image>(parent, src);
-            // Cover the window, centred (the posters are a little taller than 16:9).
-            image->set_position(recompui::Position::Absolute);
-            image->set_top(50.0f, recompui::Unit::Percent);
-            image->set_left(0);
-            image->set_width(100.0f, recompui::Unit::Percent);
-            image->set_height_auto();
-            image->set_translate_2D(0.0f, -50.0f, recompui::Unit::Percent);
-            image->set_opacity(posters.empty() ? 1.0f : 0.0f);
-            posters.push_back(image);
-        }
-        current_poster = 0;
-        poster_shown = std::chrono::steady_clock::now();
-    }
-
-    void update_launcher(recompui::LauncherMenu*) {
-        if (posters.size() < 2 || std::chrono::steady_clock::now() - poster_shown < poster_time) {
+        std::ifstream layout(recompui::file::get_asset_path("poster/layout.txt"));
+        float poster_w = 0.0f, poster_h = 0.0f;
+        if (!(layout >> poster_w >> poster_h) || poster_w <= 0.0f || poster_h <= 0.0f) {
+            std::printf("[frontend] no poster layout\n");
             return;
         }
-        posters[current_poster]->set_opacity(0.0f);
-        current_poster = (current_poster + 1) % posters.size();
-        posters[current_poster]->set_opacity(1.0f);
-        poster_shown = std::chrono::steady_clock::now();
+        auto load = [&](const std::string& file, const std::string& src) {
+            std::ifstream in(recompui::file::get_asset_path(("poster/" + file).c_str()), std::ios::binary);
+            std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            if (!bytes.empty()) {
+                recompui::queue_image_from_bytes_file(src, bytes);
+            }
+            return !bytes.empty();
+        };
+        // Covers the window's width, centred (a 16:9 poster): a clear 16:9 picture gives the frame its height.
+        recompui::Element* frame = context.create_element<recompui::Element>(parent);
+        frame->set_position(recompui::Position::Absolute);
+        frame->set_top(50.0f, recompui::Unit::Percent);
+        frame->set_left(0);
+        frame->set_width(100.0f, recompui::Unit::Percent);
+        frame->set_height_auto();
+        frame->set_translate_2D(0.0f, -50.0f, recompui::Unit::Percent);
+        if (load("sizer.png", "?/conker/poster_sizer")) {
+            recompui::Image* sizer = context.create_element<recompui::Image>(frame, "?/conker/poster_sizer");
+            sizer->set_display(recompui::Display::Block);
+            sizer->set_width(100.0f, recompui::Unit::Percent);
+            sizer->set_height_auto();
+        }
+        poster_pieces.clear();
+        std::string file, name;
+        float x, y, w, h;
+        int panels = 0;
+        while (layout >> file >> x >> y >> w >> h >> name) {
+            const std::string src = "?/conker/poster_" + name;
+            if (!load(file, src)) {
+                continue;
+            }
+            recompui::Image* image = context.create_element<recompui::Image>(frame, src);
+            image->set_position(recompui::Position::Absolute);
+            image->set_left(100.0f * x / poster_w, recompui::Unit::Percent);
+            image->set_top(100.0f * y / poster_h, recompui::Unit::Percent);
+            image->set_width(100.0f * w / poster_w, recompui::Unit::Percent);
+            image->set_height(100.0f * h / poster_h, recompui::Unit::Percent);
+            image->set_opacity(0.0f);
+            PosterPiece piece;
+            piece.image = image;
+            piece.logo = name == "logo";
+            piece.shade = name == "shade";
+            if (!piece.logo && !piece.shade) {
+                // Out from the poster's middle toward where it sits.
+                const float cx = (x + w * 0.5f) / poster_w - 0.5f, cy = (y + h * 0.5f) / poster_h - 0.5f;
+                const float len = std::max(0.05f, std::sqrt(cx * cx + cy * cy));
+                piece.dx = cx / len * 0.45f;
+                piece.dy = cy / len * 0.45f;
+                piece.delay = panels_after + panels * panel_step;
+                panels++;
+            }
+            poster_pieces.push_back(piece);
+        }
+        for (PosterPiece& piece : poster_pieces) {
+            if (piece.logo || piece.shade) {
+                piece.delay = panels_after + std::max(0, panels - 1) * panel_step + logo_after;
+            }
+        }
+        poster_started = false;
+        poster_done = poster_pieces.empty();
+    }
+
+    float ease_out_cubic(float t) { const float u = 1.0f - t; return 1.0f - u * u * u; }
+    float ease_out_back(float t) { const float c = 1.7f, u = t - 1.0f; return 1.0f + (c + 1.0f) * u * u * u + c * u * u; }
+
+    void update_launcher(recompui::LauncherMenu*) {
+        if (poster_done) {
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (!poster_started) {
+            poster_started = true; // from the first frame shown, not while it loaded
+            poster_start = now;
+        }
+        const float seconds = std::chrono::duration<float>(now - poster_start).count();
+        bool all_done = true;
+        for (PosterPiece& piece : poster_pieces) {
+            const float length = piece.logo ? logo_seconds : panel_seconds;
+            const float t = std::clamp((seconds - piece.delay) / length, 0.0f, 1.0f);
+            all_done = all_done && t >= 1.0f;
+            if (piece.shade) {
+                piece.image->set_opacity(t);
+            } else if (piece.logo) {
+                // Lands from big, a little turned, with a small overshoot.
+                const float e = ease_out_back(t);
+                const float scale = 1.0f + 0.9f * (1.0f - e);
+                piece.image->set_opacity(std::clamp(t * 2.5f, 0.0f, 1.0f));
+                piece.image->set_scale_2D(scale, scale);
+                piece.image->set_rotation(-10.0f * (1.0f - e));
+            } else {
+                const float e = ease_out_cubic(t);
+                piece.image->set_opacity(std::clamp(t * 1.6f, 0.0f, 1.0f));
+                piece.image->set_translate_2D(100.0f * piece.dx * (1.0f - e), 100.0f * piece.dy * (1.0f - e), recompui::Unit::Percent);
+                const float scale = 1.0f + 0.12f * (1.0f - e);
+                piece.image->set_scale_2D(scale, scale);
+            }
+        }
+        poster_done = all_done;
     }
 
     // Prints what SDL says about a controller (name, GUID, mapping, device), for controller reports.
@@ -213,24 +295,6 @@ namespace {
         conker::qol::update();
     }
 
-    // The logo, in the dark left part of the poster.
-    void add_logo(recompui::LauncherMenu* menu) {
-        std::ifstream file(recompui::file::get_asset_path("logo.png"), std::ios::binary);
-        std::vector<char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        if (bytes.empty()) {
-            return;
-        }
-        recompui::queue_image_from_bytes_file("?/conker/logo", bytes);
-        recompui::Image* logo = recompui::get_current_context().create_element<recompui::Image>(
-            menu->get_background_container(), "?/conker/logo");
-        logo->set_position(recompui::Position::Absolute);
-        logo->set_left(6.0f, recompui::Unit::Percent);
-        logo->set_top(50.0f, recompui::Unit::Percent);
-        logo->set_height(80.0f, recompui::Unit::Percent);
-        logo->set_width_auto();
-        logo->set_translate_2D(0.0f, -50.0f, recompui::Unit::Percent);
-    }
-
     // Warm colours for the launcher and every menu (recompui's default is blue).
     void apply_theme() {
         using recompui::theme::color;
@@ -255,6 +319,8 @@ namespace {
     // that only changes the game's data (main.cpp's accept_rom). It replaces the stored one; saves
     // and settings stay.
     constexpr uint64_t uncensored_rom_hash = 0xAC445026C8F77A94ULL; // the uncensored speech hack
+    constexpr uint64_t german_rom_hash = 0xFA76F05BA7E6D7D9ULL; // the German translation (ConkerDeutschMod 0.2.0)
+    constexpr uint64_t russian_rom_hash = 0xB97E9AFFEA6ED925ULL; // the Russian fan translation (as CBFD-Recompiled lists it)
 
     std::string rom_title(const std::filesystem::path& path) {
         std::ifstream file(path, std::ios::binary);
@@ -264,7 +330,7 @@ namespace {
         }
         const uint64_t hash = XXH3_64bits(rom.data(), rom.size());
         return hash == conker::us_rom_hash ? "ROM: Original" : hash == uncensored_rom_hash ? "ROM: Uncensored" :
-            hash == conker::french_rom_hash ? "ROM: French" : "ROM: Modified";
+            hash == conker::french_rom_hash ? "ROM: French" : hash == german_rom_hash ? "ROM: German" : hash == russian_rom_hash ? "ROM: Russian" : "ROM: Modified";
     }
 
     std::filesystem::path stored_rom_path(const std::u8string& game_id) {
@@ -302,7 +368,6 @@ namespace {
         const recomp::GameEntry& game = supported_games[0];
         menu->remove_default_title();
         add_posters(menu);
-        add_logo(menu);
         // recompui's UI exists now: the FPS counter can make its own.
         conker::fps_counter::on_ui_ready();
         conker::crosshair::on_ui_ready();
@@ -409,7 +474,8 @@ namespace {
         }
         // The Free Camera steers with the right stick: while it's pushed, it doesn't also press
         // the C-buttons it's bound to (C-Left/C-Right would hand the camera back to the game).
-        if (controller == 0) {
+        // (Not while Aiming: Swap Sticks has the right stick aiming: the C-buttons then come from the left stick.)
+        if (controller == 0 && !conker::look_aim::swap_sticks_now(0)) {
             float cx = 0.0f, cy = 0.0f;
             conker::free_camera_stick(&cx, &cy);
             constexpr uint16_t c_right = 0x0001, c_left = 0x0002, c_down = 0x0004, c_up = 0x0008;
@@ -516,7 +582,32 @@ namespace {
         return count;
     }
 
-    float controller_field_analog(SDL_GameController* controller, const recompinput::InputField& field) {
+    // From CBFD-Recompiled V0.1.6 (MIT): the stick axis read for an axis bound. With swap (Aiming: Swap Sticks),
+    // the left stick's axes are read from the right stick and the right's from the left, so whatever the profile
+    // binds to either stick (by default the N64 stick to the left, the C-buttons to the right) moves to the other.
+    int stick_axis(int axis, bool swap) {
+        if (!swap) {
+            return axis;
+        }
+        switch (axis) {
+        case SDL_CONTROLLER_AXIS_LEFTX: return SDL_CONTROLLER_AXIS_RIGHTX;
+        case SDL_CONTROLLER_AXIS_LEFTY: return SDL_CONTROLLER_AXIS_RIGHTY;
+        case SDL_CONTROLLER_AXIS_RIGHTX: return SDL_CONTROLLER_AXIS_LEFTX;
+        case SDL_CONTROLLER_AXIS_RIGHTY: return SDL_CONTROLLER_AXIS_LEFTY;
+        default: return axis;
+        }
+    }
+
+    // Whether a binding is to the right stick (the C-buttons, by default).
+    bool is_right_stick(const recompinput::InputField& field) {
+        if (field.input_type != recompinput::InputType::ControllerAnalog) {
+            return false;
+        }
+        const int axis = std::abs(field.input_id) - 1;
+        return axis == SDL_CONTROLLER_AXIS_RIGHTX || axis == SDL_CONTROLLER_AXIS_RIGHTY;
+    }
+
+    float controller_field_analog(SDL_GameController* controller, const recompinput::InputField& field, bool swap = false) {
         switch (field.input_type) {
         case recompinput::InputType::ControllerDigital:
             if (field.input_id >= 0 && field.input_id < SDL_CONTROLLER_BUTTON_MAX) {
@@ -528,7 +619,7 @@ namespace {
             if (axis < 0 || axis >= SDL_CONTROLLER_AXIS_MAX) {
                 return 0.0f;
             }
-            float value = SDL_GameControllerGetAxis(controller, (SDL_GameControllerAxis)axis) * (1.0f / 32768.0f);
+            float value = SDL_GameControllerGetAxis(controller, (SDL_GameControllerAxis)stick_axis(axis, swap)) * (1.0f / 32768.0f);
             if (field.input_id < 0) {
                 value = -value;
             }
@@ -539,11 +630,11 @@ namespace {
         }
     }
 
-    bool controller_field_digital(SDL_GameController* controller, const recompinput::InputField& field) {
+    bool controller_field_digital(SDL_GameController* controller, const recompinput::InputField& field, bool swap = false) {
         if (field.input_type == recompinput::InputType::ControllerAnalog) {
-            return controller_field_analog(controller, field) >= recompinput::axis_digital_threshold;
+            return controller_field_analog(controller, field, swap) >= recompinput::axis_digital_threshold;
         }
-        return controller_field_analog(controller, field) > 0.0f;
+        return controller_field_analog(controller, field, swap) > 0.0f;
     }
 
     // The keyboard and the mouse are player 1's: their bindings count on port 1 only. Mouse buttons
@@ -552,8 +643,9 @@ namespace {
         return field.input_type == recompinput::InputType::Keyboard || field.input_type == recompinput::InputType::Mouse;
     }
 
-    // One controller (or none) and/or the keyboard and mouse, through the single-player bindings.
-    void read_port(SDL_GameController* controller, bool keyboard, uint16_t* buttons, float* x, float* y) {
+    // One controller (or none) and/or the keyboard and mouse, through the single-player bindings. With swap_sticks
+    // (Aiming: Swap Sticks, while aiming), the controller's two sticks are read the other way round.
+    void read_port(SDL_GameController* controller, bool keyboard, bool swap_sticks, bool z_turns_aim, uint16_t* buttons, float* x, float* y) {
         using recompinput::GameInput;
         static constexpr uint16_t button_values[] = {
             0x8000, 0x4000, 0x2000, 0x0020, 0x0010, 0x1000, 0x0008,
@@ -574,7 +666,7 @@ namespace {
                     v += keyboard ? recompinput::get_input_analog(0, field) : 0.0f;
                 }
                 else if (controller != nullptr) {
-                    v += controller_field_analog(controller, field);
+                    v += controller_field_analog(controller, field, swap_sticks);
                 }
             }
             return std::clamp(v, 0.0f, 1.0f);
@@ -591,11 +683,15 @@ namespace {
         };
 
         uint16_t cur_buttons = 0;
+        // With swap_sticks, the buttons pressed only by the left stick (bindings to the right stick, read from the
+        // left): see below.
+        uint16_t left_stick_buttons = 0;
         float cur_x = 0.0f;
         float cur_y = 0.0f;
         for (size_t b = 0; b < std::size(button_values); b++) {
             GameInput input = (GameInput)((size_t)GameInput::N64_BUTTON_START + b);
             bool pressed = false;
+            bool by_left_stick = false;
             for (size_t i = 0; i < recompinput::num_bindings_per_input; i++) {
                 if (cont_profile >= 0) {
                     const recompinput::InputField& field = binding(cont_profile, input, i);
@@ -603,7 +699,13 @@ namespace {
                         pressed |= keyboard && recompinput::get_input_digital(0, field);
                     }
                     else if (controller != nullptr) {
-                        pressed |= controller_field_digital(controller, field);
+                        const bool down = controller_field_digital(controller, field, swap_sticks);
+                        if (swap_sticks && is_right_stick(field)) {
+                            by_left_stick |= down;
+                        }
+                        else {
+                            pressed |= down;
+                        }
                     }
                 }
                 if (keyboard && kb_profile >= 0) {
@@ -616,15 +718,43 @@ namespace {
             if (pressed) {
                 cur_buttons |= button_values[b];
             }
+            else if (by_left_stick) {
+                left_stick_buttons |= button_values[b];
+            }
         }
+        // Aiming: Swap Sticks: the left stick presses the C-buttons, which move Conker while aiming, but not C-Left and
+        // C-Right while Z is held aiming the shotgun (z_turns_aim): Z makes them turn the aim instead.
+        constexpr uint16_t z_button = 0x2000, c_left = 0x0002, c_right = 0x0001;
+        if ((cur_buttons & z_button) && z_turns_aim) {
+            left_stick_buttons &= (uint16_t)~(c_left | c_right);
+        }
+        cur_buttons |= left_stick_buttons;
         if (controller != nullptr && cont_profile >= 0) {
             cur_x = cont_analog(GameInput::X_AXIS_POS) - cont_analog(GameInput::X_AXIS_NEG);
             cur_y = cont_analog(GameInput::Y_AXIS_POS) - cont_analog(GameInput::Y_AXIS_NEG);
             recompinput::apply_joystick_deadzone(cur_x, cur_y, &cur_x, &cur_y);
         }
         if (keyboard && kb_profile >= 0) {
-            cur_x += kb_analog(GameInput::X_AXIS_POS) - kb_analog(GameInput::X_AXIS_NEG);
-            cur_y += kb_analog(GameInput::Y_AXIS_POS) - kb_analog(GameInput::Y_AXIS_NEG);
+            const float kb_x = kb_analog(GameInput::X_AXIS_POS) - kb_analog(GameInput::X_AXIS_NEG);
+            const float kb_y = kb_analog(GameInput::Y_AXIS_POS) - kb_analog(GameInput::Y_AXIS_NEG);
+            if (swap_sticks) {
+                // With the keyboard the mouse aims, so the keys bound to the stick (W, A, S, D by default) press the
+                // C-buttons and move Conker, as the left stick does (not C-Left or C-Right while Z is held).
+                constexpr uint16_t c_up = 0x0008, c_down = 0x0004;
+                uint16_t keys = 0;
+                if (kb_x <= -recompinput::axis_digital_threshold) keys |= c_left;
+                if (kb_x >= recompinput::axis_digital_threshold) keys |= c_right;
+                if (kb_y >= recompinput::axis_digital_threshold) keys |= c_up;
+                if (kb_y <= -recompinput::axis_digital_threshold) keys |= c_down;
+                if ((cur_buttons & z_button) && z_turns_aim) {
+                    keys &= (uint16_t)~(c_left | c_right);
+                }
+                cur_buttons |= keys;
+            }
+            else {
+                cur_x += kb_x;
+                cur_y += kb_y;
+            }
         }
         *buttons = cur_buttons;
         *x = std::clamp(cur_x, -1.0f, 1.0f);
@@ -651,7 +781,8 @@ namespace {
         }
         if (!recompinput::game_input_disabled()) {
             // Port 1 has the keyboard, and its controller once one has pressed a button.
-            read_port(port < count ? controllers[port] : nullptr, port == 0, buttons, x, y);
+            read_port(port < count ? controllers[port] : nullptr, port == 0, conker::look_aim::swap_sticks_now(port),
+                conker::look_aim::z_turns_aim(port), buttons, x, y);
         }
         return true;
     }

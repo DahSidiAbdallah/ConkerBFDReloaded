@@ -85,6 +85,19 @@ void conker::testing::on_vi(uint8_t* rdram) {
         MEM_B(0, (gpr)(int32_t)poke_addr) = (int8_t)(MEM_B(0, (gpr)(int32_t)poke_addr) + poke_delta);
         std::printf("[testing] poke %08X += %d\n", poke_addr, poke_delta);
     }
+    // CONKER_TEST_GUN=seconds:state: Conker's weapon state then (+0x31C's +0x78; the shotgun is 0x3B), to test the
+    // guns without playing to them.
+    static double gun_at = -1.0; static int gun_state = 0;
+    static const bool gun_parsed = [] {
+        if (const char* p = std::getenv("CONKER_TEST_GUN")) { std::sscanf(p, "%lf:%x", &gun_at, &gun_state); }
+        return true;
+    }();
+    (void)gun_parsed;
+    if (gun_at > 0 && rdram != nullptr && now == (uint32_t)(gun_at * 60.0)) {
+        const gpr state = (gpr)(int32_t)MEM_W(0, (gpr)(int32_t)(0x800CC2D0 + 0x31C));
+        MEM_B(0x78, state) = (int8_t)gun_state;
+        std::printf("[testing] weapon state %02X\n", gun_state);
+    }
     // Testing aid: CONKER_TEST_TEXT=seconds:findhex:replacehex: from then on, once a
     // second until found, look for that text in memory and replace it (same length).
     static double text_at = -1.0; static std::string text_find, text_repl; static bool text_done = false;
@@ -281,6 +294,7 @@ extern "C" void conker_test_camera_flags(uint8_t* rdram, recomp_context* ctx) {
 }
 
 extern "C" void conker_ledge_grab_watchdog(uint8_t* rdram, recomp_context* ctx); // ledge_grab.cpp
+extern "C" void conker_move_while_shooting(uint8_t* rdram, recomp_context* ctx); // move_shoot.cpp
 
 // Testing aid: CONKER_TEST_SINK=seconds:units moves Conker down by that much every game frame from
 // then on while he's hanging, climbing up or hopping up (stands in for getting stuck on a ledge, for
@@ -315,8 +329,8 @@ static void test_track(uint8_t* rdram) {
     next = t + every;
     constexpr int32_t player = (int32_t)0x800CC2D0;
     const uint32_t camera = (uint32_t)MEM_W(0, (gpr)(int32_t)0x800DBFF0);
-    std::printf("[track] %.2fs at %.1f %.1f %.1f anim %04X", t, read_real(rdram, player + 0x14), read_real(rdram, player + 0x18),
-        read_real(rdram, player + 0x1C), (unsigned)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16));
+    std::printf("[track] %.2fs at %.1f %.1f %.1f anim %04X surface %08X", t, read_real(rdram, player + 0x14), read_real(rdram, player + 0x18),
+        read_real(rdram, player + 0x1C), (unsigned)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16), (unsigned)MEM_W(0x8C, (gpr)player));
     if ((camera & 0xFF000000u) == 0x80000000u) {
         const int32_t c = (int32_t)camera;
         std::printf(" eye %.1f %.1f %.1f look %.1f %.1f %.1f mode %d", read_real(rdram, c + 0x2F8), read_real(rdram, c + 0x2FC), read_real(rdram, c + 0x300),
@@ -330,6 +344,7 @@ extern "C" void conker_probe_frame_end(uint8_t* rdram, recomp_context* ctx) {
     test_travel(rdram, ctx);
     test_sink(rdram);
     conker_ledge_grab_watchdog(rdram, ctx);
+    conker_move_while_shooting(rdram, ctx);
     conker_pause_background_tick(rdram);
     conker_probe_pause(rdram, ctx, 0);
     static const bool probe = std::getenv("CONKER_PROBE") != nullptr;
@@ -432,3 +447,4 @@ extern "C" void conker_probe_pause(uint8_t* rdram, recomp_context* ctx, int tag)
 extern "C" void conker_probe_pause_start() {
     conker_probe_pause(nullptr, nullptr, 5);
 }
+

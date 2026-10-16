@@ -18,6 +18,7 @@ if exist C:\ConkerRecompWin\swim_debug.flag set CONKER_SWIM_DEBUG=1
 if exist C:\ConkerRecompWin\prompt_debug.flag set CONKER_PROMPT_DEBUG=1
 if exist C:\ConkerRecompWin\track.flag set CONKER_TEST_TRACK=1
 if exist C:\ConkerRecompWin\track_fast.flag set CONKER_TEST_TRACK_FAST=1
+if exist C:\ConkerRecompWin\test_zoom.txt set /p CONKER_TEST_ZOOM=<C:\ConkerRecompWin\test_zoom.txt
 if exist C:\ConkerRecompWin\test_slope.txt set /p CONKER_TEST_SLOPE=<C:\ConkerRecompWin\test_slope.txt
 if exist C:\ConkerRecompWin\prompt_pictures.flag set CONKER_PROMPT_PICTURES=C:\ConkerRecompWin\snaps\prompt_pictures
 if exist C:\ConkerRecompWin\test_warp.txt set /p CONKER_TEST_WARP=<C:\ConkerRecompWin\test_warp.txt
@@ -27,6 +28,7 @@ if exist C:\ConkerRecompWin\test_camera_flags.txt set /p CONKER_TEST_CAMERA_FLAG
 if exist C:\ConkerRecompWin\test_sink.txt set /p CONKER_TEST_SINK=<C:\ConkerRecompWin\test_sink.txt
 if exist C:\ConkerRecompWin\test_device.txt set /p CONKER_TEST_DEVICE=<C:\ConkerRecompWin\test_device.txt
 if exist C:\ConkerRecompWin\test_poke.txt set /p CONKER_TEST_POKE=<C:\ConkerRecompWin\test_poke.txt
+if exist C:\ConkerRecompWin\test_gun.txt set /p CONKER_TEST_GUN=<C:\ConkerRecompWin\test_gun.txt
 if exist C:\ConkerRecompWin\vtxlight.flag set RT64_CBFD_VTXLIGHT_LOG=C:\ConkerRecompWin\snaps\vtxlight.txt
 if exist C:\ConkerRecompWin\cull43.flag set CONKER_TEST_43_CULLING=1
 if exist C:\ConkerRecompWin\old_lightpos.flag set RT64_CBFD_OLD_LIGHTPOS=1

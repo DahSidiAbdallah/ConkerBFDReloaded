@@ -99,6 +99,12 @@ namespace {
         return (uint16_t)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16);
     }
 
+    // Opened up (the mask cleared above), the search only takes edges of flat ground: a real ledge's top
+    // (a beam, a platform, a cliff's top) is flat, while the sides of a ramp or a staircase are slanted
+    // and he hung from them. The game's own grab spots keep its own limit.
+    bool opened_search = false;
+    constexpr float flat_ground = 0.97f; // the ground's normal's upward part (about 14 degrees of slope)
+
     constexpr uint16_t climbing_animation = 0x40, hopping_animation = 0xEA, falling_animation = 0x38;
     constexpr int32_t stuck_after = 48;    // area timer ticks (60 a second) in those animations
     constexpr float stuck_sink = 40.0f;    // this far below the highest he was in them
@@ -155,6 +161,7 @@ extern "C" void conker_ledge_grab_mask(uint8_t* rdram, recomp_context* ctx) {
             (uint32_t)MEM_W(0, (gpr)(player + 0x100)) >> 24, real(rdram, player + 0x24), real(rdram, player + 0x1CC), real(rdram, player + 0x180),
             real(rdram, player + 0x14), real(rdram, player + 0x18), real(rdram, player + 0x1C), animation(rdram), (int)fall.caught);
     }
+    opened_search = false;
     if ((int32_t)ctx->r7 != player) {
         return;
     }
@@ -183,6 +190,7 @@ extern "C" void conker_ledge_grab_mask(uint8_t* rdram, recomp_context* ctx) {
     // vertical speed, above zero), and low steps never come level with his hands.
     if (flags == 0x00 && vertical_speed < 0.0f) {
         ctx->r8 = 0;
+        opened_search = true;
         return;
     }
     // Walked off: 0x11 as he steps off, 0x10 once the fall goes on (a moment in, which can be before
@@ -197,6 +205,7 @@ extern "C" void conker_ledge_grab_mask(uint8_t* rdram, recomp_context* ctx) {
         return;
     }
     ctx->r8 = 0; // every ground edge may be grabbed
+    opened_search = true;
     fall.walked_off = fall.grounded_seen;
     if (!fall.first_air_seen) {
         fall.first_air_seen = true;
@@ -264,5 +273,14 @@ extern "C" void conker_ledge_grab_found(uint8_t* rdram, recomp_context* ctx) {
     set_real(rdram, found_z, fall.last_ground[1] + dz * hang_from_last_ground);
     if (debug) {
         std::printf("[grab] handed over the edge he walked off: top %.1f step %.1f facing %04X\n", top, step, facing);
+    }
+}
+
+// func_150AC480 (the search, for each ground triangle near him) at 0x150AC53C, about to drop the
+// triangle if its slope (the normal's upward part, $f1) is no more than the limit ($f2): opened up,
+// only flat ground (above).
+extern "C" void conker_ledge_grab_flatness(uint8_t* rdram, recomp_context* ctx) {
+    if (opened_search && ctx->f2.fl < flat_ground) {
+        ctx->f2.fl = flat_ground;
     }
 }

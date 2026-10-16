@@ -15,10 +15,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 
 #include "ultramodern/ultramodern.hpp"
+#include "ultramodern/config.hpp"
 #include "recompui/recompui.h"
 #include "elements/ui_label.h"
 
@@ -107,6 +109,13 @@ void conker::fps_counter::update() {
     last_time = now;
     last_presented = presented;
     last_game = game;
+    // Testing: CONKER_FPS_LOG prints it, with the frame rate the renderer is set to aim for (the
+    // graphics settings' choice, and the display's refresh rate it found).
+    static const bool log = std::getenv("CONKER_FPS_LOG") != nullptr;
+    if (log) {
+        std::printf("[fps] %s | target %u (setting %d, display %u)\n", text, ultramodern::get_target_framerate(30),
+            (int)ultramodern::renderer::get_graphics_config().rr_option, ultramodern::get_display_refresh_rate());
+    }
 
     context.open();
     label->set_text(text);
