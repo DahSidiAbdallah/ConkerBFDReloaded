@@ -439,6 +439,18 @@ func = "func_15180580"
 before_vram = 0x151814F4
 text = "{ extern void conker_iris_end(uint8_t*, recomp_context*); conker_iris_end(rdram, ctx); }"
 
+# Widescreen: the eyelids opening and blinking (waking up on the boat in It's War) are redrawn reaching the window's
+# edges too (host/src/widescreen.cpp).
+[[patches.hook]]
+func = "func_15181EE0"
+before_vram = 0x15181EE0
+text = "{ extern void conker_eyelids_begin(uint8_t*, recomp_context*); conker_eyelids_begin(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_15181EE0"
+before_vram = 0x15182668
+text = "{ extern void conker_eyelids_end(uint8_t*, recomp_context*); conker_eyelids_end(rdram, ctx); }"
+
 
 # Ours: separate music and sound-effect volumes (host/src/sound_mix.cpp): __n_vsVol
 # tells which voices are the music player's; voice volumes are scaled when set.

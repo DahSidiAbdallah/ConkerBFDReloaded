@@ -199,6 +199,7 @@ namespace {
                 // left moves, and he walks as he fires.
                 { Tab::General, "aim_swap_sticks", e(0u /* Off */), e(1u /* On */) },
                 { Tab::General, "aim_move_while_shooting", e(0u /* Off */), e(1u /* On */) },
+                { Tab::General, "aim_face_camera", e(0u /* Off */), e(1u /* On */) },
             };
             return list;
         }();

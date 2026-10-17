@@ -136,6 +136,8 @@ namespace {
     std::atomic<uint16_t> player_buttons{ 0 };     // player 1's own buttons (before the toggles)
     std::atomic<int64_t> cutscene_seen{ 0 };       // the check last ran (a cutscene is playing)
     std::atomic<int64_t> hold_started{ 0 };        // 0: not holding
+    std::atomic<bool> unskippable{ false };        // the playing cutscene is the game over: skipped by pressing A for it
+    std::atomic<bool> pressing_for_skip{ false };  // held long enough there: A pressed until it's over
     std::atomic<bool> wait_for_release{ false };   // after a skip, until L is let go
     std::atomic<float> hold_progress{ 0.0f };
 
@@ -442,6 +444,17 @@ void conker::qol::set_player_buttons(uint16_t buttons) {
     player_buttons = buttons;
 }
 
+// Hold to Skip in the game over: A pressed and let go in turn (a few frames each, as the game takes presses) until
+// the game over is no longer playing (to the menu), so that press can't reach the menu's PLAY.
+uint16_t conker::qol::apply_skip_press(uint16_t buttons) {
+    if (!pressing_for_skip.load() || !unskippable.load() || !conker::qol::cutscene_playing()) {
+        return buttons;
+    }
+    static int frame = 0;
+    constexpr uint16_t button_a = 0x8000;
+    return (frame++ / 4) % 2 == 0 ? (uint16_t)(buttons | button_a) : (uint16_t)(buttons & ~button_a);
+}
+
 uint16_t conker::qol::apply_toggles(uint16_t buttons) {
     constexpr uint16_t button_r = 0x0010, button_z = 0x2000;
     buttons = toggle_r.apply(buttons, button_r, conker::qol::toggle_r_look());
@@ -627,6 +640,14 @@ extern "C" void conker_skip_cutscene_result(uint8_t* rdram, recomp_context* ctx)
     if (!conker::qol::skip_any_cutscene()) {
         return;
     }
+    // The game over (the throne room, 0x18, its cutscene 0x0F; D_800C35E8 is the playing cutscene) isn't skipped
+    // this way: forced to end, it ended in the throne room as if it were a level, Conker (stuffed) walking about
+    // under GAME OVER, instead of going back to the menu. The game skips it itself on a press (to the menu), but not
+    // at every moment: so once L is held long enough, A is pressed for the player until it's over (apply_skip_press).
+    unskippable = (uint32_t)MEM_W(0, (gpr)(int32_t)0x800BE9F0) == 0x18 && (uint8_t)MEM_BU(0, (gpr)(int32_t)0x800C35E8) == 0x0F;
+    if (!unskippable.load()) {
+        pressing_for_skip = false;
+    }
     const uint16_t pressed = (uint16_t)MEM_HU(0, (gpr)(int32_t)0x800BE710); // this frame's new presses
     const bool by_itself = ctx->r2 != 0 && (pressed & (button_l | button_start)) == 0;
     const bool held = (player_buttons.load() & button_l) != 0;
@@ -644,8 +665,15 @@ extern "C" void conker_skip_cutscene_result(uint8_t* rdram, recomp_context* ctx)
         hold_started = 0;
         wait_for_release = true; // not the next cutscene too
         hold_progress = 0.0f;
+        if (unskippable.load()) {
+            pressing_for_skip = true;
+            return;
+        }
         ctx->r2 = 1;
         return;
+    }
+    if (unskippable.load()) {
+        return; // the game's own result
     }
     ctx->r2 = by_itself ? 1 : 0;
 }
@@ -685,6 +713,13 @@ void conker::qol::on_vi_memory(uint8_t* rdram) {
         return;
     }
     update_on_foot(rdram);
+    // Testing aid: CONKER_TEST_F9=seconds presses F9 then (test_f9.txt, run_host.bat).
+    static const double test_f9 = [] { const char* p = std::getenv("CONKER_TEST_F9"); return p ? std::atof(p) : -1.0; }();
+    static bool test_f9_done = false;
+    if (test_f9 > 0.0 && !test_f9_done && conker::testing::game_seconds() >= test_f9) {
+        test_f9_done = true;
+        capture_requests++;
+    }
     if (capture_requests.load() > 0) {
         capture_requests--;
         static const bool enabled = std::filesystem::exists(recomp::get_config_path() / "capture_enabled");
@@ -697,6 +732,7 @@ void conker::qol::on_vi_memory(uint8_t* rdram) {
             }
             // And the free camera's last few seconds, frame by frame (free_camera.cpp).
             conker::free_camera_write_history(recomp::get_config_path() / ("camera_" + std::to_string(count) + ".txt"));
+            conker::events_write(recomp::get_config_path() / ("events_" + std::to_string(count) + ".txt"));
         }
     }
     conker::qol::longer_spin_on_vi(rdram);

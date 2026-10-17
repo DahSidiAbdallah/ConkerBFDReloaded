@@ -73,17 +73,30 @@ extern "C" volatile int rt64_cbfd_log_window; // rt64_rsp.cpp (testing)
 
 void conker::testing::on_vi(uint8_t* rdram) {
     uint32_t now = ++vis;
-    // CONKER_TEST_POKE=seconds:hexaddress:delta: adds delta to the byte at that address then (e.g. player 1's
-    // lives, 0x800D2144), to make the game show its HUD (finding the HUD's timers).
-    static double poke_at = -1.0; static uint32_t poke_addr = 0; static int poke_delta = 0;
+    // CONKER_TEST_POKE=seconds:hexaddress:delta;...: adds delta to the byte at that address then (e.g. player 1's
+    // lives, 0x800D2144; Conker's health, 0x800CC49A), to make the game show its HUD or reach a game over.
+    struct Poke { double at; uint32_t addr; int delta; };
+    static std::vector<Poke> pokes;
     static const bool poke_parsed = [] {
-        if (const char* p = std::getenv("CONKER_TEST_POKE")) { std::sscanf(p, "%lf:%x:%d", &poke_at, &poke_addr, &poke_delta); }
+        if (const char* p = std::getenv("CONKER_TEST_POKE")) {
+            std::string all(p);
+            size_t pos = 0;
+            while (pos <= all.size()) {
+                const size_t end = all.find(';', pos);
+                Poke k{ -1.0, 0, 0 };
+                if (std::sscanf(all.substr(pos, end - pos).c_str(), "%lf:%x:%d", &k.at, &k.addr, &k.delta) == 3) pokes.push_back(k);
+                if (end == std::string::npos) break;
+                pos = end + 1;
+            }
+        }
         return true;
     }();
     (void)poke_parsed;
-    if (poke_at > 0 && rdram != nullptr && now == (uint32_t)(poke_at * 60.0)) {
-        MEM_B(0, (gpr)(int32_t)poke_addr) = (int8_t)(MEM_B(0, (gpr)(int32_t)poke_addr) + poke_delta);
-        std::printf("[testing] poke %08X += %d\n", poke_addr, poke_delta);
+    for (const Poke& k : pokes) {
+        if (rdram != nullptr && now == (uint32_t)(k.at * 60.0)) {
+            MEM_B(0, (gpr)(int32_t)k.addr) = (int8_t)(MEM_B(0, (gpr)(int32_t)k.addr) + k.delta);
+            std::printf("[testing] poke %08X += %d\n", k.addr, k.delta);
+        }
     }
     // CONKER_TEST_GUN=seconds:state: Conker's weapon state then (+0x31C's +0x78; the shotgun is 0x3B), to test the
     // guns without playing to them.
@@ -447,4 +460,5 @@ extern "C" void conker_probe_pause(uint8_t* rdram, recomp_context* ctx, int tag)
 extern "C" void conker_probe_pause_start() {
     conker_probe_pause(nullptr, nullptr, 5);
 }
+
 

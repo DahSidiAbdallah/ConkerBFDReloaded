@@ -73,6 +73,8 @@ namespace conker {
         bool z_turns_aim(int player);
         // Aiming: Move While Shooting (move_shoot.cpp).
         bool move_while_shooting();
+        // Aiming: Face Where the Camera Looks (free_camera.cpp).
+        bool face_camera();
     }
 
     // settings.cpp: the settings tabs.
@@ -102,6 +104,10 @@ namespace conker {
     void free_camera_stick(float* x, float* y);
     // free_camera.cpp: testing (F9 with capture_enabled): the free camera's last frames, as text.
     void free_camera_write_history(const std::filesystem::path& path);
+    // scene_fixes.cpp: the last room changes and button presses (an F9 capture writes them, events_<n>.txt), to
+    // see what led to a rare state (the game over that leaves Conker controllable in the throne room).
+    void events_note(const char* what, uint32_t a, uint32_t b);
+    void events_write(const std::filesystem::path& path);
     // scene_fixes.cpp: Skip Intro's steps.
     void skip_intro_on_vi(uint8_t* rdram);
     bool skip_intro_pressing_start();
@@ -141,6 +147,7 @@ namespace conker {
         void on_vi();         // every VI: Pause When Unfocused holds the game here
         void set_player_buttons(uint16_t buttons); // player 1's own buttons (Skip Any Cutscene's hold)
         uint16_t apply_toggles(uint16_t buttons); // player 1's buttons: Toggle R-Look / Crouch
+        uint16_t apply_skip_press(uint16_t buttons); // player 1's buttons: Hold to Skip's press in the game over
         void apply_walk(uint16_t buttons, float* x, float* y); // player 1's stick: Walk Button
         void apply_swim(float* y); // player 1's stick: Invert Swimming
         int walk_button(); // 0 off, 1 hold L, 2 toggle L

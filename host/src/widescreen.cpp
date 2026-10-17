@@ -559,6 +559,90 @@ extern "C" void conker_iris_end(uint8_t* rdram, recomp_context* ctx) {
     put_command(rdram, game_dl, g_dl_branch, wide_dl);
 }
 
+// func_15181EE0 draws eyelids over the picture (waking up on the boat at the start of It's War, opening and
+// blinking; D_800DDE18 points at how shut they are): black fill rectangles above and below (func_1517F9F4), and
+// a textured strip with the lid's ragged edge along each, all clipped to the camera's sides, the 4:3 frame. RT64
+// doesn't widen those, so in widescreen the sides showed the game past the lids' ends. As with the circle wipe,
+// what it wrote is redrawn in a display list of ours: the pieces that reach the frame's sides reach past them,
+// the strips' texture carried along (it repeats across).
+namespace {
+    gpr eyelids_dl_start = 0;
+}
+
+extern "C" void conker_eyelids_begin(uint8_t* rdram, recomp_context* ctx) {
+    eyelids_dl_start = ctx->r4;
+}
+
+// At its return: $v0 is the end of what it wrote (the start, when the eyes are open).
+extern "C" void conker_eyelids_end(uint8_t* rdram, recomp_context* ctx) {
+    const gpr start = eyelids_dl_start;
+    const gpr end = ctx->r2;
+    eyelids_dl_start = 0;
+    constexpr size_t max_commands = 96;
+    if (start == 0 || end <= start || end - start > max_commands * 8) {
+        return;
+    }
+    Command cmds[max_commands];
+    const size_t count = (size_t)(end - start) / 8;
+    for (size_t i = 0; i < count; i++) {
+        cmds[i] = { (uint32_t)MEM_W(i * 8, start), (uint32_t)MEM_W(i * 8 + 4, start) };
+    }
+    const int32_t left = camera_bound(rdram, 0, camera_left);
+    const int32_t right = camera_bound(rdram, 0, camera_right);
+    const int32_t wide_left = left <= 4 ? left - wide_reach : left;
+    const int32_t wide_right = right >= 286 ? right + wide_reach : right;
+    if (wide_left == left && wide_right == right) {
+        return;
+    }
+    const uint32_t needed = (2 + (uint32_t)count * 2) * 8;
+    if (wide_dl_offset + needed > wide_dl_size) {
+        wide_dl_offset = 0;
+    }
+    const uint32_t wide_dl = wide_dl_start + wide_dl_offset;
+    wide_dl_offset += (needed + 15) & ~15u;
+    gpr dl = (gpr)(int32_t)(0x80000000u | wide_dl);
+    put_command(rdram, dl, (rt64_hook_opcode << 24) | rt64_hook_magic, (rt64_hook_op_enable << 28) | rt64_extended_opcode);
+    for (size_t i = 0; i < count; i++) {
+        const Command& c = cmds[i];
+        if (c.op() == 0xF6) {
+            // G_FILLRECT: lower right in w0, upper left in w1 (10 bits each, then 2 of fraction).
+            int32_t ulx = (int32_t)((c.w1 >> 14) & 0x3FF), uly = (int32_t)((c.w1 >> 2) & 0x3FF);
+            int32_t lrx = (int32_t)((c.w0 >> 14) & 0x3FF), lry = (int32_t)((c.w0 >> 2) & 0x3FF);
+            if (ulx <= left + 1) ulx = wide_left;
+            if (lrx >= right - 1) lrx = wide_right;
+            put_fill(rdram, dl, ulx, uly, lrx, lry);
+            continue;
+        }
+        if (c.op() == 0xE4 && i + 2 < count && cmds[i + 1].op() == 0xE1 && cmds[i + 2].op() == 0xF1) {
+            // G_TEXRECT and its two halves: 10.2 corners, then s and t (10.5), then the steps (5.10).
+            int32_t ulx4 = (int32_t)((c.w1 >> 12) & 0xFFF), uly4 = (int32_t)(c.w1 & 0xFFF);
+            int32_t lrx4 = (int32_t)((c.w0 >> 12) & 0xFFF), lry4 = (int32_t)(c.w0 & 0xFFF);
+            const uint32_t tile = (c.w1 >> 24) & 0x7;
+            const int32_t dsdx = (int16_t)(cmds[i + 2].w1 >> 16);
+            int32_t s = (int16_t)(cmds[i + 1].w1 >> 16);
+            const uint32_t t = cmds[i + 1].w1 & 0xFFFF;
+            if (ulx4 <= (left + 1) * 4) {
+                s += ((wide_left * 4 - ulx4) * dsdx) >> 7;
+                ulx4 = wide_left * 4;
+            }
+            if (lrx4 >= (right - 1) * 4) {
+                lrx4 = wide_right * 4;
+            }
+            put_command(rdram, dl, (rt64_extended_opcode << 24) | g_ex_texrect_v1,
+                tile | (g_ex_origin_none << 3) | (g_ex_origin_none << 15));
+            put_command(rdram, dl, ((uint32_t)(ulx4 & 0xFFFF) << 16) | (uint32_t)(uly4 & 0xFFFF),
+                ((uint32_t)(lrx4 & 0xFFFF) << 16) | (uint32_t)(lry4 & 0xFFFF));
+            put_command(rdram, dl, ((uint32_t)(s & 0xFFFF) << 16) | t, cmds[i + 2].w1);
+            i += 2;
+            continue;
+        }
+        put_command(rdram, dl, c.w0, c.w1);
+    }
+    put_command(rdram, dl, g_dl_branch, (uint32_t)end & 0x00FFFFFF);
+    gpr game_dl = start;
+    put_command(rdram, game_dl, g_dl_branch, wide_dl);
+}
+
 // func_1501B22C builds a camera's frustum from its fields of view: the view-space
 // normals of its four side planes, which the game culls the world and its objects
 // against. RT64 widens the picture, but those planes still hold the 4:3 view, so

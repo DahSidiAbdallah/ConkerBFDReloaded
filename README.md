@@ -55,7 +55,7 @@ nothing else changes.
 **Modern** turns on widescreen, the smooth frame rate, sharper 2D graphics, smooth shading,
 Conker on his most detailed model at any distance, the free camera, the aiming crosshair, the
 autosave icon, hold-to-skip cutscenes, pausing when you alt-tab, Skip Intro, direct mouse aiming,
-twin-stick aiming (Swap Sticks and Move While Shooting), Ledge Grab, the Longer Tail Spin, the air
+twin-stick aiming (Swap Sticks, Move While Shooting, and aiming where the camera looks), Ledge Grab, the Longer Tail Spin, the air
 meter, and button prompts that show your keys and mouse buttons when you play with them.
 
 While Classic or Modern is picked, the settings it decides are greyed out. Pick **Custom** to
@@ -88,6 +88,9 @@ change any of them yourself.
   shot stopped him for a second. With Swap Sticks as well (see below), you aim with the right stick
   and move with the left the whole time: proper twin-stick shooting. (Aiming: Move While Shooting on
   the General tab.)
+- **Aim where the camera looks.** With the free camera, pressing R to aim the shotgun or the twin guns
+  starts the aim the way the camera looks, not the way Conker faces: turn the camera toward trouble and
+  press R. (Aiming: Face Where the Camera Looks on the General tab.)
 - **A new launcher.** A GTA-style collage of the game's best moments, one from each chapter, that
   flies together with the logo as the launcher opens.
 - **Autosave icon.** A little Conker head in the corner while the game saves, like modern games.
@@ -101,7 +104,8 @@ change any of them yourself.
   where there's no room it comes in toward Conker (or, in a tight bend, turns aside to where there
   is), and it glides back out when there's space. Next to things it can't see coming, like a crate
   you're pushing, it holds still instead of jumping in and out.
-  Tilted down, it settles just above the ground, and tilting further looks up past Conker. Walking
+  Tilted down, it settles just above the ground (even where the ground rises behind Conker), and
+  tilting further looks up past Conker. Walking
   up or down a slope, it tilts a little with the slope so you can see where you're going. Click the
   right stick to switch between near, middle and far.
 - **An Accessibility tab:** press R or Z once to look around or crouch instead of holding them,

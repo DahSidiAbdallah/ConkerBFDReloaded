@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <mutex>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -167,8 +169,41 @@ namespace {
 extern "C" void func_1501C730(uint8_t* rdram, recomp_context* ctx);
 
 // func_15007A70(a, b, room)'s entry: the game changing rooms.
+namespace {
+    struct Event { double t; const char* what; uint32_t a, b, room; };
+    constexpr size_t event_count = 400;
+    Event events[event_count];
+    size_t event_next = 0, event_total = 0;
+    std::mutex events_mutex;
+    std::atomic<uint32_t> event_room{ 0 };
+}
+
+void conker::events_note(const char* what, uint32_t a, uint32_t b) {
+    std::lock_guard<std::mutex> lock(events_mutex);
+    events[event_next] = { conker::testing::game_seconds(), what, a, b, event_room.load() };
+    event_next = (event_next + 1) % event_count;
+    event_total++;
+}
+
+void conker::events_write(const std::filesystem::path& path) {
+    std::lock_guard<std::mutex> lock(events_mutex);
+    FILE* f = std::fopen(path.string().c_str(), "w");
+    if (f == nullptr) {
+        return;
+    }
+    std::fprintf(f, "time event a b room\n");
+    const size_t n = std::min(event_total, event_count);
+    for (size_t i = 0; i < n; i++) {
+        const Event& e = events[(event_next + event_count - n + i) % event_count];
+        std::fprintf(f, "%.3f %s %04X %04X %02X\n", e.t, e.what, e.a, e.b, e.room);
+    }
+    std::fclose(f);
+}
+
 extern "C" void conker_room_change(uint8_t* rdram, recomp_context* ctx) {
     uint32_t room = (uint32_t)(ctx->r6 & 0xFFFF);
+    conker::events_note("room_change", (uint32_t)MEM_W(0, current_room), room);
+    event_room = room;
     static const bool probe = std::getenv("CONKER_PROBE") != nullptr;
     if (probe) {
         std::printf("[room] %02X -> %02X\n", (uint32_t)MEM_W(0, current_room), room);

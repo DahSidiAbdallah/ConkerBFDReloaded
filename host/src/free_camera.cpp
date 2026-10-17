@@ -49,6 +49,7 @@
 #include "recompinput/input_state.h"
 #include "recompinput/input_types.h"
 
+#include "recompinput/players.h"
 #include "conker.hpp"
 
 namespace {
@@ -97,6 +98,9 @@ namespace {
     // up at him; there it stops tilting once it's come in to closest_tilted, with all of him in
     // view. Otherwise, standing near an edge, it went down past the edge and the ledge hid him.
     constexpr float above_feet = 24.0f;
+    // And as far above the ground under the eye itself (the game's own camera keeps 40: func_1512BB10).
+    constexpr float above_ground = 24.0f;
+    constexpr float ground_step = 40.0f, ground_climb = 60.0f;
     constexpr float closest_tilted = 140.0f;
     // Tilting up further than that, the view aims up from the eye, to this angle above the horizon at most.
     constexpr float highest_view = 80.0f * degrees_to_radians;
@@ -179,6 +183,7 @@ namespace {
         float lift = 0.0f;              // radians the eye is raised out of a squeeze
         float side = 0.0f;              // radians the eye is turned aside from the player's angle (walls)
         float aim = 0.0f;               // radians the view aims up past the lowest the eye can go (0: at the look-at point)
+        float ground_at_eye = 0.0f;     // the ground last found under the eye's line, at its far end
         float held = 0.0f;              // the game's collision held the eye this near (0: not held), with:
         int held_frames = 0;            // frames left to keep to it, before letting it out held_step a frame
         bool held_seen = false;         // held where the ball saw something (seen_hold): let go at once, not by held_step
@@ -227,11 +232,58 @@ extern "C" void conker_mouse_camera_follow(uint8_t* rdram, recomp_context* ctx) 
 // func_15120158 (the look mode: hold R, and aiming such as the slingshot on a B pad), after
 // its first instruction. The mouse aims there (look_aim.cpp), so the orbit leaves the
 // camera to it: otherwise both turned with the mouse, and the view ran ahead of the aim.
+// Aiming: Face Where the Camera Looks: aiming a gun (the twin guns 0x09, the shotgun 0x3B: Conker's weapon state,
+// +0x31C's +0x78) starts the way the free camera looked, not the way Conker faced. Pressing R, the camera's mode
+// (+0x2C) turns to aiming (0x100) and the game glides the view into his aim over about a second from his facing,
+// before the look mode (func_15120158) runs: so on the first frame of that mode his facing (+0x7A, and +0x76 he
+// moves along) is turned to the free camera's last view and the aiming angle (+0x12 of the camera's +0x3D4) is
+// cleared, and the glide's target turned with them (+0x774): turned only when the look mode started, it glided to
+// his old facing and then cut across. Single player only.
+namespace {
+    bool view_facing_known = false;      // view_facing holds the free camera's last view, as a facing
+    uint16_t view_facing = 0;
+    double view_facing_at = 0.0;         // game seconds then
+    constexpr double view_facing_fresh = 0.15;
+    constexpr uint32_t aiming_mode = 0x100;
+    uint32_t last_camera_mode = 0;
+
+    void face_camera_on_aim(uint8_t* rdram, gpr camera) {
+        const uint32_t mode = (uint32_t)MEM_W(0x2C, camera);
+        const bool started = mode == aiming_mode && last_camera_mode != aiming_mode;
+        last_camera_mode = mode;
+        if (!started || !view_facing_known || !conker::look_aim::face_camera() || !recompinput::players::is_single_player_mode() ||
+            conker::testing::game_seconds() - view_facing_at > view_facing_fresh) {
+            return;
+        }
+        const gpr conker = (gpr)(int32_t)MEM_W(0x3D0, camera);
+        if ((uint32_t)conker != player_object) {
+            return;
+        }
+        const gpr state = (gpr)(int32_t)MEM_W(0x31C, conker);
+        const uint8_t weapon = ((uint32_t)state & 0xFF000000u) == 0x80000000u ? (uint8_t)MEM_BU(0x78, state) : 0;
+        if (weapon != 0x09 && weapon != 0x3B) {
+            return;
+        }
+        MEM_H(0x7A, conker) = (int16_t)view_facing;
+        MEM_H(0x76, conker) = (int16_t)view_facing;
+        // And the glide's target yaw (+0x774, degrees: the facing less 90, taken from his facing as R was pressed),
+        // so the view glides to the camera's side, not to where he faced.
+        float yaw = (float)view_facing * (360.0f / 65536.0f) - 90.0f;
+        if (yaw < 0.0f) yaw += 360.0f;
+        write_float(rdram, camera, 0x774, yaw);
+        const gpr aim = (gpr)(int32_t)MEM_W(0x3D4, camera);
+        if (((uint32_t)aim & 0xFF000000u) == 0x80000000u) {
+            MEM_H(0x12, aim) = 0;
+        }
+    }
+}
+
 extern "C" void conker_mouse_camera_look_mode(uint8_t* rdram, recomp_context* ctx) {
     orbit.look_mode_ran = true;
 }
 
 extern "C" void func_15044380(uint8_t* rdram, recomp_context* ctx);
+extern "C" void func_1510E8BC(uint8_t* rdram, recomp_context* ctx); // the game: the ground under a point
 
 namespace {
     // The camera's ball: can a ball of this radius go from `from` to `to` without touching
@@ -295,6 +347,37 @@ namespace {
     // of a frame: moved far at once, the ball can pass through a thin post. So it goes in steps of
     // about its size, and the step it can't make is halved down to where it stops. A smaller ball
     // goes at least as far as a bigger one: it starts where that one stopped.
+    // The ground under a point, as the game's own camera finds it under its eye (func_1512BB10 at 0x1512C00C, which
+    // then keeps the eye 40 above it): func_1510E8BC with the point's x, y, z on the stack, the height out at $a2.
+    // Looked for from `from_y` down (above the eye, so ground above it is found too). no_ground where there's none.
+    constexpr float no_ground = -10000.0f; // D_800A3690
+    float ground_under(uint8_t* rdram, recomp_context* ctx, float x, float from_y, float z) {
+        recomp_context saved = *ctx;
+        const gpr sp = ctx->r29 - 0x100;
+        const gpr out = sp + 0x60;
+        write_float(rdram, out, 0, no_ground);
+        MEM_W(0x10, sp) = 0;
+        MEM_W(0x14, sp) = 0;
+        write_float(rdram, sp, 0x18, x);
+        write_float(rdram, sp, 0x1C, from_y);
+        write_float(rdram, sp, 0x20, z);
+        write_float(rdram, sp, 0x24, from_y);
+        MEM_W(0x28, sp) = 0;
+        MEM_W(0x2C, sp) = 0;
+        write_float(rdram, sp, 0x30, no_ground);
+        write_float(rdram, sp, 0x34, from_y);
+        MEM_W(0x38, sp) = 1;
+        ctx->r4 = 0;
+        ctx->r5 = 0;
+        ctx->r6 = out;
+        ctx->r7 = 0;
+        ctx->r29 = sp;
+        func_1510E8BC(rdram, ctx);
+        const float ground = read_float(rdram, out, 0);
+        *ctx = saved;
+        return ground;
+    }
+
     float ball_room(uint8_t* rdram, recomp_context* ctx, gpr camera, const float look[3], const float dir[3], float full) {
         auto point = [&](float along, float out[3]) {
             for (int i = 0; i < 3; i++) out[i] = look[i] + dir[i] * along;
@@ -612,6 +695,44 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     if (dir[1] < 0.0f) {
         distance = std::min(distance, std::max((cy - lowest) / -dir[1], std::min(tilt_room, distance)));
     }
+    // The ball doesn't stop at floors (it slides along them, and along anything sloped enough to stand on, like
+    // It's War's tank traps), and the rule above only keeps the eye above Conker's feet: where the ground rises behind
+    // him (It's War's beach) the eye went under it. So the line out to the eye is walked in ground_step steps from his
+    // feet, the ground under each found from a little over the last one (ground_climb: following a rise, not an
+    // overhang high above), and the eye stops where it would come within above_ground of it.
+    {
+        float ground = read_float(rdram, camera, 0x2A8); // under Conker
+        float clear = 0.0f;
+        bool blocked = false;
+        auto sinks = [&](float along, float& found) {
+            const float x = look[0] + dir[0] * along, y = look[1] + dir[1] * along, z = look[2] + dir[2] * along;
+            found = ground_under(rdram, ctx, x, std::max(y, ground) + ground_climb, z);
+            return found > no_ground + 1.0f && y < found + above_ground;
+        };
+        while (clear < distance) {
+            const float next = std::min(clear + ground_step, distance);
+            float found;
+            if (sinks(next, found)) {
+                float low = clear, high = next;
+                for (int k = 0; k < reach_halvings; k++) {
+                    const float mid = 0.5f * (low + high);
+                    float f;
+                    (sinks(mid, f) ? high : low) = mid;
+                }
+                clear = low;
+                blocked = true;
+                break;
+            }
+            if (found > no_ground + 1.0f) {
+                ground = found;
+            }
+            clear = next;
+        }
+        if (blocked) {
+            distance = std::max(clear, std::min(min_reach, distance));
+        }
+        orbit.ground_at_eye = ground;
+    }
     // Held by the collision (an object the ball doesn't see): no further out than it allows (see held_hold).
     if (orbit.held > 0.0f) {
         if (orbit.held_frames > 0) {
@@ -630,8 +751,17 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     }
     float target[3];
     for (int i = 0; i < 3; i++) target[i] = look[i] + dir[i] * distance;
+    // Still under the ground there (a bump between him and the eye, or a rise too steep to come in under): up over
+    // it, as the game's own camera does.
+    {
+        const float ground = ground_under(rdram, ctx, target[0], std::max(target[1], orbit.ground_at_eye) + ground_climb, target[2]);
+        if (ground > no_ground + 1.0f && target[1] < ground + above_ground) {
+            target[1] = ground + above_ground;
+        }
+    }
     static const bool trace_sight = std::getenv("CONKER_CAM_TRACE") != nullptr;
     if (trace_sight) {
+        std::printf("[ground] eye y %.1f ground %.1f feet %.1f\n", target[1], ground_under(rdram, ctx, target[0], std::max(target[1], orbit.ground_at_eye) + ground_climb, target[2]), read_float(rdram, camera, 0x2A8));
         std::printf("[sight] t=%.3f reach %.1f distance %.1f pitch %.1f lift %.1f side %.1f slope %.2f us %lld\n", now, orbit.reach, distance, orbit.pitch * 57.2958f, orbit.lift * 57.2958f, orbit.side * 57.2958f, orbit.shown_slope,
             (long long)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - timing_start).count());
     }
@@ -654,8 +784,20 @@ extern "C" void conker_mouse_camera(uint8_t* rdram, recomp_context* ctx) {
         return;
     }
     was_normal_camera = orbit.follow_camera_ran && !orbit.look_mode_ran;
+    face_camera_on_aim(rdram, camera);
     if (!orbit.follow_camera_ran || orbit.look_mode_ran) {
         orbit.engaged = false;
+    }
+    // The free camera's view as a facing, for Aiming: Face Where the Camera Looks (facing 0x4000 looks down -z,
+    // 0 down +x: atan2(-dz, dx)).
+    if (orbit.engaged) {
+        const float dx = read_float(rdram, camera, 0x2BC) - read_float(rdram, camera, 0x2F8);
+        const float dz = read_float(rdram, camera, 0x2C4) - read_float(rdram, camera, 0x300);
+        if (dx * dx + dz * dz > 1.0f) {
+            view_facing = (uint16_t)(int32_t)std::lround(std::atan2(-dz, dx) * 32768.0 / 3.14159265358979);
+            view_facing_known = true;
+            view_facing_at = conker::testing::game_seconds();
+        }
     }
     // Walls and tight spots: the collision left the eye at +0x2F8. Nearer than the view was: go
     // there at once. Further: ease back out. Along the same line from the look-at point.

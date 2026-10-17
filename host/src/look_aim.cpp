@@ -144,6 +144,7 @@ namespace {
         const std::string aim_lock_on = "aim_lock_on";
         // Ours (move_shoot.cpp):
         const std::string aim_move_while_shooting = "aim_move_while_shooting";
+        const std::string aim_face_camera = "aim_face_camera";
     }
 
     enum class Response : uint32_t { Smooth, Direct };
@@ -262,6 +263,15 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
         "stick and move with the left the whole time, twin-stick style. (Experimental: the shotgun only so far.)"
         "<br /><recomp-color primary>Off</recomp-color>: as in the original.",
         toggle, Toggle::Off);
+    config.add_enum_option(options::aim_face_camera, "Aiming: Face Where the Camera Looks",
+        "With the free camera, aiming a gun (the shotgun, the twin guns) starts the way the camera looks, in single "
+        "player: turn the camera to the left and press R, and Conker aims to the left."
+        "<br /><recomp-color primary>Off</recomp-color>: as in the original, aiming starts the way Conker faces.",
+        toggle, Toggle::Off);
+}
+
+bool conker::look_aim::face_camera() {
+    return option<Toggle>(options::aim_face_camera) == Toggle::On;
 }
 
 bool conker::look_aim::move_while_shooting() {

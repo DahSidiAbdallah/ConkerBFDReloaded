@@ -487,9 +487,17 @@ namespace {
         }
         if (controller == 0) {
             conker::qol::set_player_buttons(*buttons);
+            {
+                static uint16_t last_buttons = 0;
+                if (*buttons != last_buttons) {
+                    conker::events_note("buttons", *buttons, last_buttons);
+                    last_buttons = *buttons;
+                }
+            }
             conker::qol::apply_walk(*buttons, x, y);
             conker::qol::apply_swim(y);
             *buttons = conker::qol::apply_toggles(*buttons);
+            *buttons = conker::qol::apply_skip_press(*buttons);
             conker::crosshair::set_buttons(*buttons);
         }
         if (controller == 0) {
