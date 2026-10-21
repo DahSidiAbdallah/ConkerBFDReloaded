@@ -457,6 +457,12 @@ uint16_t conker::qol::apply_skip_press(uint16_t buttons) {
 
 uint16_t conker::qol::apply_toggles(uint16_t buttons) {
     constexpr uint16_t button_r = 0x0010, button_z = 0x2000;
+    // A cutscene (a context pad's, say) lets go of a toggled R-Look or crouch: kept down through it, Conker came out
+    // of it looking (or crouching) without R having been pressed.
+    if (conker::qol::cutscene_playing()) {
+        toggle_r.held = false;
+        toggle_z.held = false;
+    }
     buttons = toggle_r.apply(buttons, button_r, conker::qol::toggle_r_look());
     buttons = toggle_z.apply(buttons, button_z, conker::qol::toggle_crouch());
     return buttons;
@@ -713,6 +719,7 @@ void conker::qol::on_vi_memory(uint8_t* rdram) {
         return;
     }
     update_on_foot(rdram);
+    conker::sound::refresh_stream_volume(rdram);
     // Testing aid: CONKER_TEST_F9=seconds presses F9 then (test_f9.txt, run_host.bat).
     static const double test_f9 = [] { const char* p = std::getenv("CONKER_TEST_F9"); return p ? std::atof(p) : -1.0; }();
     static bool test_f9_done = false;

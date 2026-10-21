@@ -92,6 +92,20 @@ extern "C" int32_t conker_stream_volume(uint8_t* rdram, int32_t volume) {
     return (int32_t)(int16_t)(volume * sound_percent(music ? conker::sound::music_volume : conker::sound::speech_volume));
 }
 
+// The stream's levels are only worked out again when D_800E0DA4 is set (the game sets it as a line starts or its
+// volume changes; func_151F2E88 clears it at 0x151F3648): so a Speech volume changed during a line only took effect
+// at the next one. When the setting changes, it's set, and the playing line follows at once.
+void conker::sound::refresh_stream_volume(uint8_t* rdram) {
+    static double last = -1.0;
+    const double now = sound_percent(conker::sound::speech_volume) + 10.0 * sound_percent(conker::sound::music_volume);
+    if (now != last) {
+        if (last >= 0.0) {
+            MEM_H(0, (gpr)(int32_t)0x800E0DA4) = 1;
+        }
+        last = now;
+    }
+}
+
 void conker::sound::add_volume_options() {
     recomp::config::Config& sound = recompui::config::get_config(recompui::config::sound::id);
     sound.add_percent_number_option(music_volume, "Music Volume",

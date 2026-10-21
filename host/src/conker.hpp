@@ -216,6 +216,8 @@ namespace conker {
         size_t frames_remaining();
         void set_frequency(uint32_t frequency);
 
+        // sound_mix.cpp: each screen refresh, a changed Speech volume reaches a line already playing.
+        void refresh_stream_volume(uint8_t* rdram);
         // sound_mix.cpp: the Sound tab's Music, Sound Effects and Speech volumes.
         inline const std::string music_volume = "conker_music_volume";
         inline const std::string effects_volume = "conker_effects_volume";
