@@ -130,13 +130,13 @@ A Linux build is in every release. On the Steam Deck, extract it in desktop mode
 mouse wheel.
 
 ## HD Icons Texture Pack
-An optional pack that makes the 2D pictures sharp: the HUD, the pause screen, menu buttons and titles, the bar's
+An optional pack for the original English version that makes the 2D pictures sharp: the HUD, the pause screen, menu buttons and titles, the bar's
 signs and the chapter names. It's built from GameBeast92's 4K Ultimate Texture Pack, with the original game's
 colours and shapes put back wherever that pack changed them.
 
 Download `ConkerBFDReloaded-HD-Icons` (`.rtz`) from the [Releases](../../releases) page, then in the game go to
-**Mods** > **Install Mods** and pick the file. Turn it off for the German translation, as it would cover the German
-pictures with English ones.
+**Mods** > **Install Mods** and pick the file. It's for English only: turn it off for translations, as it would cover their
+pictures with English ones. For French, use the HD Icons (French) pack instead (see [Playing in French](#playing-in-french)).
 
 Textures by [GameBeast92](https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k-Ultimate-Texture-Pack), used and
 modified under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The `LICENSE.txt` inside the pack lists
@@ -180,6 +180,7 @@ Start it once from a terminal with `./ConkerBFDReloaded --rom /path/to/conker.z6
 * The HD Icons (French) pack is missing about 40 pictures that only show up at certain moments of the story.
 * A few lines are still bleeped with the uncensored ROM: the bleeps are in the ROM hack itself.
 * In Bat's Tower, after the third cog, Conker's lips don't move and the cog's line can be silent.
+* In It's War, at the end of the beach, the Sergeant's line is silent when he saves Conker.
 * Not tested everywhere yet: Linux on real hardware, frame rates above 60, rumble, gyro and multiplayer,
   Face Where the Camera Looks with the shotgun, and the German and Russian translations.
 * No macOS build yet.
