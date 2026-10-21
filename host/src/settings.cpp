@@ -31,6 +31,7 @@ namespace {
     enum class FreeCamera : uint32_t { Off, Stick, StickAndMouse };
     std::atomic<uint32_t> free_camera_mode{ (uint32_t)FreeCamera::StickAndMouse };
     std::atomic<uint32_t> button_prompts_mode{ (uint32_t)conker::ButtonPrompts::Automatic };
+    std::atomic<uint32_t> launcher_poster_choice{ 0 };
     // Set when the settings files still have the Free Camera as it was before it moved to the General
     // tab (an on/off switch on the Conker tab, and the mouse's own switch): carried over once loaded.
     std::optional<FreeCamera> free_camera_carried;
@@ -275,6 +276,30 @@ namespace {
         }
     }
 
+    // Launcher Poster's description, with a picture of the poster picked (Random: all of them, small). The
+    // pictures (assets/menu/poster_preview_<n>.png) are loaded by frontend.cpp.
+    constexpr uint32_t launcher_posters = 11;
+    std::string launcher_poster_about(uint32_t choice) {
+        std::string about = "The picture behind the launcher's menu. It changes as soon as you pick one, and the picture "
+            "below shows it.<br /><recomp-color primary>Current</recomp-color>: the collage of the game's moments. "
+            "<recomp-color primary>Old</recomp-color>: Conker at the bar, from before 1.4.0. "
+            "<recomp-color primary>King</recomp-color>, <recomp-color primary>Chainsaw</recomp-color>, "
+            "<recomp-color primary>Dollar Eyes</recomp-color>, <recomp-color primary>Panther King</recomp-color> and "
+            "<recomp-color primary>Three Scenes</recomp-color>: scenes from the game's opening. "
+            "<recomp-color primary>Birdy</recomp-color>, <recomp-color primary>Sunflower</recomp-color>, "
+            "<recomp-color primary>Gregg</recomp-color> and <recomp-color primary>Berri</recomp-color>: the characters you meet. "
+            "<recomp-color primary>Random</recomp-color>: a different one each time you start.<br /><br />";
+        if (choice < launcher_posters) {
+            about += "<img src=\"?/conker/poster_preview_" + std::to_string(choice) + "\" style=\"width: 480dp; height: 270dp;\" />";
+        } else {
+            for (uint32_t i = 0; i < launcher_posters; i++) {
+                about += "<img src=\"?/conker/poster_preview_" + std::to_string(i) +
+                    "\" style=\"width: 160dp; height: 90dp; margin: 0 6dp 6dp 0;\" />";
+            }
+        }
+        return about;
+    }
+
     void create_conker_tab() {
         recomp::config::Config& conker = recompui::config::create_config_tab("Conker", "conker", false);
         conker.add_enum_option(
@@ -336,6 +361,18 @@ namespace {
         add_bool("saving_icon", "Autosave Icon",
             "Shows Conker's head in the <recomp-color primary>bottom-right corner</recomp-color> while the game saves (at checkpoints and on the "
             "save menu), so you know your progress is safe. The original game shows none.", true, &saving_icon_on);
+        // The posters: frontend.cpp's poster_folders, in this order, then Random.
+        conker.add_enum_option("launcher_poster", "Launcher Poster", launcher_poster_about(0),
+            { { 0u, "Current", "Current" }, { 1u, "Old", "Old" }, { 2u, "King", "King" }, { 3u, "Chainsaw", "Chainsaw" },
+              { 4u, "DollarEyes", "Dollar Eyes" }, { 5u, "PantherKing", "Panther King" }, { 6u, "ThreeScenes", "Three Scenes" },
+              { 7u, "Birdy", "Birdy" }, { 8u, "Sunflower", "Sunflower" }, { 9u, "Gregg", "Gregg" }, { 10u, "Berri", "Berri" },
+              { 11u, "Random", "Random" } },
+            0u);
+        conker.add_option_change_callback("launcher_poster",
+            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+                launcher_poster_choice = std::get<uint32_t>(cur);
+                recompui::config::get_config("conker").update_option_description("launcher_poster", launcher_poster_about(launcher_poster_choice));
+            });
     }
 
     // The Accessibility tab: options that make the game easier to see, play and control.
@@ -576,6 +613,10 @@ bool conker::crosshair::enabled() {
 }
 
 // Testing aid: CONKER_SKIP_INTRO=1 skips it whatever the setting.
+uint32_t conker::launcher_poster() {
+    return launcher_poster_choice;
+}
+
 bool conker::skip_intro() {
     static const bool forced = std::getenv("CONKER_SKIP_INTRO") != nullptr;
     return skip_intro_enabled || forced;

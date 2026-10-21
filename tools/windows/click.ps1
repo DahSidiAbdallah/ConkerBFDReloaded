@@ -24,6 +24,10 @@ for ($i = 0; $i -lt $pts.Length; $i++) {
     [M]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 60; [M]::mouse_event(4,0,0,0,0); Start-Sleep -Milliseconds 300
     Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); "pressed ESC"; continue
   }
+  if ($pts[$i].StartsWith("m")) {
+    # "mX,Y": only move the mouse there (to see hover looks).
+    $xy = $pts[$i].Substring(1).Split(","); [M]::SetCursorPos($r.L + [int]$xy[0], $r.T + [int]$xy[1]) | Out-Null; "moved to $($pts[$i])"; continue
+  }
   $xy = $pts[$i].Split(","); [M]::SetCursorPos($r.L + [int]$xy[0], $r.T + [int]$xy[1]) | Out-Null
   Start-Sleep -Milliseconds 150; [M]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 60; [M]::mouse_event(4,0,0,0,0)
   "clicked $($pts[$i])"

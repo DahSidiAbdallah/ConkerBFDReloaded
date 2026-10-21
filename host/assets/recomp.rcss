@@ -1,6 +1,16 @@
-
 /*
-  In order for rml to parse the base style sheet and combine with this one, any style needs to at least be present.
-  If you add styles to this file later, you can clear the current contents of this file.
+  Conker's look for the settings (RecompFrontend's ui_conker_look.h adds these classes): dark edges
+  around the letters, the page titles' gold rim. (No box-shadow: the renderer draws it in the wrong place.)
 */
-.rml-needs-something-in-this-file {}
+.conker-pill {
+    font-effect: outline(2dp #1a0700);
+}
+.conker-name {
+    font-effect: outline(3dp #2b1300), shadow(2dp 3dp #000000);
+}
+.conker-heading {
+    font-effect: outline(3dp #f2c040), shadow(2dp 4dp #000000);
+}
+.conker-title {
+    font-effect: outline(5dp #e9b33a), shadow(3dp 5dp #000000);
+}

@@ -5,9 +5,15 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cctype>
+#include <filesystem>
+#include <map>
+#include <random>
 #include <mutex>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -28,6 +34,7 @@
 #include "recompinput/input_state.h"
 #include "recompinput/players.h"
 #include "recompinput/profiles.h"
+#include "recompui/config.h"
 #include "recompui/program_config.h"
 #include "recompui/recompui.h"
 #include "recompui/renderer.h"
@@ -60,13 +67,15 @@ namespace {
 namespace {
     // Luckiest Guy (Apache License 2.0, assets/LuckiestGuy-LICENSE.txt).
     constexpr const char* title_font = "Luckiest Guy";
-    const recompui::Color orange{ 0xF0, 0x7A, 0x1E, 0xFF };
+
     const recompui::Color cream{ 0xFF, 0xE9, 0xC2, 0xFF };
 
     // The launcher's poster: a collage of the game's moments (real N64 frames) in slanted panels, in the
     // style of the GTA covers, with the game's own logo over the middle (assets/poster: one picture a
     // panel, cut to its shape, and layout.txt with where each goes on the 2560x1440 poster, the logo last).
-    // As the launcher opens the panels fly in one after another from outside, then the logo lands on top.
+    // As the launcher opens the panels fly in one after another from outside, then the logo lands on top,
+    // then the menu's buttons slide in (any key, click or controller button skips to the end). Other posters
+    // can be picked in Settings > Conker > Launcher Poster: poster_folders, laid out the same way.
     struct PosterPiece {
         recompui::Image* image = nullptr;
         float dx = 0.0f, dy = 0.0f;   // the way it flies in from (a part of its own size)
@@ -77,20 +86,32 @@ namespace {
     std::vector<PosterPiece> poster_pieces;
     bool poster_started = false, poster_done = false;
     std::chrono::steady_clock::time_point poster_start;
-    constexpr float panel_seconds = 0.6f, panel_step = 0.09f, panels_after = 0.5f; // (the window takes a moment to show)
+    constexpr float panel_seconds = 0.55f, panel_step = 0.07f, panels_after = 0.05f;
     constexpr float logo_seconds = 0.85f, logo_after = 0.35f; // after the last panel starts
 
-    void add_posters(recompui::LauncherMenu* menu) {
+    // The choices of Launcher Poster (settings.cpp) in order; the one after them, Random, picks one each start.
+    // (tools/launcher_art: hero_posters.py makes king..gregg, poster_previews.py their pictures for the setting.)
+    constexpr const char* poster_folders[] = { "poster", "poster_old", "poster_king", "poster_chainsaw", "poster_dollar",
+        "poster_panther", "poster_three", "poster_birdy", "poster_sunflower", "poster_gregg", "poster_berri" };
+    recompui::Element* poster_holder = nullptr;
+    uint32_t poster_choice = 0;   // the setting the poster shown follows
+    size_t poster_shown = SIZE_MAX;
+    std::atomic<bool> intro_skip{ false };
+    bool buttons_shown = false;
+    std::chrono::steady_clock::time_point buttons_start;
+    constexpr float button_seconds = 0.45f, button_step = 0.07f;
+
+    void build_poster(const std::string& folder) {
         recompui::ContextId context = recompui::get_current_context();
-        recompui::Element* parent = menu->get_background_container();
-        std::ifstream layout(recompui::file::get_asset_path("poster/layout.txt"));
+        recompui::Element* parent = poster_holder;
+        std::ifstream layout(recompui::file::get_asset_path((folder + "/layout.txt").c_str()));
         float poster_w = 0.0f, poster_h = 0.0f;
         if (!(layout >> poster_w >> poster_h) || poster_w <= 0.0f || poster_h <= 0.0f) {
             std::printf("[frontend] no poster layout\n");
             return;
         }
         auto load = [&](const std::string& file, const std::string& src) {
-            std::ifstream in(recompui::file::get_asset_path(("poster/" + file).c_str()), std::ios::binary);
+            std::ifstream in(recompui::file::get_asset_path((file.find('/') == std::string::npos ? folder + "/" + file : file).c_str()), std::ios::binary);
             std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
             if (!bytes.empty()) {
                 recompui::queue_image_from_bytes_file(src, bytes);
@@ -105,7 +126,7 @@ namespace {
         frame->set_width(100.0f, recompui::Unit::Percent);
         frame->set_height_auto();
         frame->set_translate_2D(0.0f, -50.0f, recompui::Unit::Percent);
-        if (load("sizer.png", "?/conker/poster_sizer")) {
+        if (load("poster/sizer.png", "?/conker/poster_sizer")) {
             recompui::Image* sizer = context.create_element<recompui::Image>(frame, "?/conker/poster_sizer");
             sizer->set_display(recompui::Display::Block);
             sizer->set_width(100.0f, recompui::Unit::Percent);
@@ -116,7 +137,7 @@ namespace {
         float x, y, w, h;
         int panels = 0;
         while (layout >> file >> x >> y >> w >> h >> name) {
-            const std::string src = "?/conker/poster_" + name;
+            const std::string src = "?/conker/" + folder + "_" + name;
             if (!load(file, src)) {
                 continue;
             }
@@ -126,6 +147,10 @@ namespace {
             image->set_top(100.0f * y / poster_h, recompui::Unit::Percent);
             image->set_width(100.0f * w / poster_w, recompui::Unit::Percent);
             image->set_height(100.0f * h / poster_h, recompui::Unit::Percent);
+            if (name == "base") {
+                // A blurred, dark copy of the poster, there from the first frame (no black wait).
+                continue;
+            }
             image->set_opacity(0.0f);
             PosterPiece piece;
             piece.image = image;
@@ -151,17 +176,204 @@ namespace {
         poster_done = poster_pieces.empty();
     }
 
+    // Shows the poster a Launcher Poster choice picks (Random: a different one than now).
+    void show_poster(uint32_t choice) {
+        size_t index = choice;
+        if (index >= std::size(poster_folders)) {
+            static std::mt19937 random{ std::random_device{}() };
+            do {
+                index = random() % std::size(poster_folders);
+            } while (index == poster_shown);
+        }
+        poster_holder->clear_children();
+        poster_pieces.clear();
+        build_poster(poster_folders[index]);
+        poster_shown = index;
+    }
+
+    // Any key, click or controller button skips the launcher's opening to the end.
+    int SDLCALL watch_intro_skip(void*, SDL_Event* event) {
+        switch (event->type) {
+        case SDL_KEYDOWN:
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONDOWN:
+            intro_skip = true;
+            break;
+        }
+        return 1;
+    }
+
+    void add_posters(recompui::LauncherMenu* menu) {
+        poster_holder = recompui::get_current_context().create_element<recompui::Element>(menu->get_background_container());
+        poster_holder->set_position(recompui::Position::Absolute);
+        poster_holder->set_top(0);
+        poster_holder->set_left(0);
+        poster_holder->set_width(100.0f, recompui::Unit::Percent);
+        poster_holder->set_height(100.0f, recompui::Unit::Percent);
+        poster_choice = conker::launcher_poster();
+        show_poster(poster_choice);
+        SDL_AddEventWatch(watch_intro_skip, nullptr);
+    }
+
     float ease_out_cubic(float t) { const float u = 1.0f - t; return 1.0f - u * u * u; }
     float ease_out_back(float t) { const float c = 1.7f, u = t - 1.0f; return 1.0f + (c + 1.0f) * u * u * u + c * u * u; }
 
-    void update_launcher(recompui::LauncherMenu*) {
-        if (poster_done) {
+    // The launcher's buttons in the game's own menu style (the pause and save menus' pill rings): each
+    // option's words are a picture (assets/menu, made by tools/launcher_art/make_buttons.py), lit (an
+    // orange-red ring) while pointed at or selected, a dark steel ring otherwise. The option's own text is
+    // hidden but kept, so it still works the same way.
+    struct MenuButton {
+        recompui::GameOption* option = nullptr;
+        recompui::Image* on = nullptr;
+        recompui::Image* off = nullptr;
+        std::string name;   // which picture it shows now
+        bool lit = false;
+    };
+    std::vector<MenuButton> menu_buttons;
+    std::string rom_button_name; // follows the ROM option's title (rom_title)
+    std::filesystem::path stored_rom_path(const std::u8string& game_id);
+    std::u8string launcher_game_id;
+
+    // "ROM: Original" -> "rom_original", "Change ROM" -> "change_rom".
+    std::string button_name(const std::string& title) {
+        std::string name;
+        for (char c : title) {
+            if (std::isalnum((unsigned char)c)) {
+                name += (char)std::tolower((unsigned char)c);
+            } else if (c == ' ' && !name.empty() && name.back() != '_') {
+                name += '_';
+            }
+        }
+        return name;
+    }
+
+    // The pictures' height on the 2560x1440 poster, read from the PNG header; shown at the poster's scale
+    // (recompui's dp is a 1080th of the window's height).
+    float picture_height(const std::vector<char>& png) {
+        if (png.size() < 24) {
+            return 0.0f;
+        }
+        const auto byte = [&](size_t i) { return (uint32_t)(uint8_t)png[i]; };
+        return (float)(byte(20) << 24 | byte(21) << 16 | byte(22) << 8 | byte(23));
+    }
+    std::map<std::string, float> picture_heights;
+
+    void load_button_pictures() {
+        for (const char* name : { "start_game", "load_rom", "controls", "settings", "mods", "exit", "change_rom", "rom_original",
+                 "rom_uncensored", "rom_french", "rom_german", "rom_russian", "rom_modified" }) {
+            for (const char* state : { "on", "off" }) {
+                const std::string file = std::string(name) + "_" + state + ".png";
+                std::ifstream in(recompui::file::get_asset_path(("menu/" + file).c_str()), std::ios::binary);
+                std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                if (!bytes.empty()) {
+                    picture_heights[std::string(name) + "_" + state] = picture_height(bytes);
+                    recompui::queue_image_from_bytes_file("?/conker/menu_" + std::string(name) + "_" + state, bytes);
+                }
+            }
+        }
+    }
+
+    void show_button_picture(MenuButton& button, const std::string& name) {
+        if (button.name == name || !picture_heights.contains(name + "_on")) {
             return;
         }
+        button.name = name;
+        constexpr float poster_to_dp = 1080.0f / 1440.0f;
+        button.on->set_src("?/conker/menu_" + name + "_on");
+        button.off->set_src("?/conker/menu_" + name + "_off");
+        button.on->set_height(picture_heights[name + "_on"] * poster_to_dp, recompui::Unit::Dp);
+        button.off->set_height(picture_heights[name + "_off"] * poster_to_dp, recompui::Unit::Dp);
+    }
+
+    void add_button_picture(recompui::GameOption* option, const std::string& name) {
+        recompui::ContextId context = recompui::get_current_context();
+        MenuButton button;
+        button.option = option;
+        option->get_label()->set_display(recompui::Display::None);
+        option->set_padding(0.0f);
+        option->set_margin_top(-20.0f); // the rings overlap a little, as on the poster
+        option->hover_style.set_background_color(recompui::theme::color::Transparent);
+        option->focus_style.set_background_color(recompui::theme::color::Transparent);
+        button.on = context.create_element<recompui::Image>(option, "");
+        button.off = context.create_element<recompui::Image>(option, "");
+        for (recompui::Image* image : { button.on, button.off }) {
+            image->set_width_auto();
+        }
+        button.on->set_display(recompui::Display::None);
+        // Hidden until the poster is up (update_buttons_intro).
+        option->set_opacity(0.0f);
+        option->set_enabled(false);
+        show_button_picture(button, name);
+        menu_buttons.push_back(button);
+    }
+
+    void update_menu_buttons() {
+        for (size_t i = 0; i < menu_buttons.size(); i++) {
+            MenuButton& button = menu_buttons[i];
+            if (i == 0) { // Start Game until there's a ROM to start: Load ROM
+                show_button_picture(button, std::filesystem::exists(stored_rom_path(launcher_game_id)) ? "start_game" : "load_rom");
+            } else if (button.name.starts_with("rom_") || button.name == "change_rom") {
+                show_button_picture(button, rom_button_name);
+            }
+            const bool lit = button.option->is_style_enabled(recompui::hover_state) || button.option->is_style_enabled(recompui::focus_state);
+            if (lit != button.lit) {
+                button.lit = lit;
+                button.on->set_display(lit ? recompui::Display::Block : recompui::Display::None);
+                button.off->set_display(lit ? recompui::Display::None : recompui::Display::Block);
+            }
+        }
+    }
+
+    // The menu's buttons slide in from the right one after another once the poster is up, and work from then on.
+    void update_buttons_intro(std::chrono::steady_clock::time_point now) {
+        if (intro_skip) {
+            buttons_start = now - std::chrono::seconds(60);
+        }
+        const float seconds = std::chrono::duration<float>(now - buttons_start).count();
+        bool all_done = true;
+        for (size_t i = 0; i < menu_buttons.size(); i++) {
+            const float t = std::clamp((seconds - i * button_step) / button_seconds, 0.0f, 1.0f);
+            const float e = ease_out_cubic(t);
+            menu_buttons[i].option->set_opacity(e);
+            menu_buttons[i].option->set_translate_2D(80.0f * (1.0f - e), 0.0f, recompui::Unit::Dp);
+            all_done = all_done && t >= 1.0f;
+        }
+        if (all_done) {
+            for (MenuButton& button : menu_buttons) {
+                button.option->set_enabled(true);
+            }
+            buttons_shown = true;
+            SDL_DelEventWatch(watch_intro_skip, nullptr);
+        }
+    }
+
+    void update_launcher(recompui::LauncherMenu*) {
+        update_menu_buttons();
         const auto now = std::chrono::steady_clock::now();
+        // A new Launcher Poster shows at once (and plays its opening).
+        const uint32_t choice = conker::launcher_poster();
+        if (choice != poster_choice) {
+            poster_choice = choice;
+            show_poster(choice);
+        }
+        if (poster_done) {
+            if (!buttons_shown) {
+                update_buttons_intro(now);
+            }
+            return;
+        }
         if (!poster_started) {
             poster_started = true; // from the first frame shown, not while it loaded
             poster_start = now;
+        }
+        if (!buttons_shown) {
+            // (recompui shows the options itself as they're set up: kept hidden until the poster is up.)
+            for (MenuButton& button : menu_buttons) {
+                button.option->set_opacity(0.0f);
+            }
+            if (intro_skip) {
+                poster_start = now - std::chrono::seconds(60);
+            }
         }
         const float seconds = std::chrono::duration<float>(now - poster_start).count();
         bool all_done = true;
@@ -187,6 +399,9 @@ namespace {
             }
         }
         poster_done = all_done;
+        if (poster_done && !buttons_shown) {
+            buttons_start = now;
+        }
     }
 
     // Prints what SDL says about a controller (name, GUID, mapping, device), for controller reports.
@@ -295,21 +510,46 @@ namespace {
         conker::qol::update();
     }
 
-    // Warm colours for the launcher and every menu (recompui's default is blue).
+    // The settings' backdrop: the poster, blurred and darkened (tools/launcher_art/make_settings_bg.py).
+    void add_settings_backdrop() {
+        std::ifstream in(recompui::file::get_asset_path("menu/settings_bg.png"), std::ios::binary);
+        std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (!bytes.empty()) {
+            recompui::queue_image_from_bytes_file("?/conker/settings_bg", bytes);
+            recompui::config::set_backdrop("?/conker/settings_bg");
+        }
+        // Launcher Poster's pictures, for its description (settings.cpp launcher_poster_about).
+        for (size_t i = 0; i < std::size(poster_folders); i++) {
+            const std::string name = "poster_preview_" + std::to_string(i);
+            std::ifstream preview(recompui::file::get_asset_path(("menu/" + name + ".png").c_str()), std::ios::binary);
+            std::vector<char> preview_bytes((std::istreambuf_iterator<char>(preview)), std::istreambuf_iterator<char>());
+            if (!preview_bytes.empty()) {
+                recompui::queue_image_from_bytes_file("?/conker/" + name, preview_bytes);
+            }
+        }
+    }
+
+    // Conker's menu colours for the launcher and every menu (recompui's default is blue): orange-red for
+    // what is chosen, gold letters (the settings' own pieces: RecompFrontend's ui_conker_look.h).
     void apply_theme() {
         using recompui::theme::color;
         auto set = recompui::theme::set_theme_color;
-        set(color::Primary, orange);
-        set(color::PrimaryL, { 0xFF, 0xA0, 0x55, 0xFF });
-        set(color::PrimaryD, { 0xB8, 0x55, 0x10, 0xFF });
-        set(color::PrimaryA5, { 0xF0, 0x7A, 0x1E, 0x0D });
-        set(color::PrimaryA20, { 0xF0, 0x7A, 0x1E, 0x33 });
-        set(color::PrimaryA30, { 0xF0, 0x7A, 0x1E, 0x4D });
-        set(color::PrimaryA50, { 0xF0, 0x7A, 0x1E, 0x80 });
-        set(color::PrimaryA80, { 0xF0, 0x7A, 0x1E, 0xCC });
+        set(color::Primary, { 0xEE, 0x4E, 0x14, 0xFF });
+        set(color::PrimaryL, { 0xFF, 0x93, 0x2B, 0xFF });
+        set(color::PrimaryD, { 0xA8, 0x30, 0x08, 0xFF });
+        set(color::PrimaryA5, { 0xEE, 0x4E, 0x14, 0x0D });
+        set(color::PrimaryA20, { 0xEE, 0x4E, 0x14, 0x33 });
+        set(color::PrimaryA30, { 0xEE, 0x4E, 0x14, 0x4D });
+        set(color::PrimaryA50, { 0xEE, 0x4E, 0x14, 0x80 });
+        set(color::PrimaryA80, { 0xEE, 0x4E, 0x14, 0xCC });
         set(color::TextActive, cream);
-        set(color::Text, { 0xF2, 0xDD, 0xBE, 0xFF });
-        set(color::TextDim, { 0xC9, 0xA5, 0x7A, 0xFF });
+        set(color::Text, { 0xF7, 0xC9, 0x48, 0xFF });
+        set(color::TextA5, { 0xF7, 0xC9, 0x48, 0x0D });
+        set(color::TextA20, { 0xF7, 0xC9, 0x48, 0x33 });
+        set(color::TextA30, { 0xF7, 0xC9, 0x48, 0x4D });
+        set(color::TextA50, { 0xF7, 0xC9, 0x48, 0x80 });
+        set(color::TextA80, { 0xF7, 0xC9, 0x48, 0xCC });
+        set(color::TextDim, { 0xD8, 0xA2, 0x2E, 0xFF });
         set(color::Elevated, { 0xF0, 0x7A, 0x1E, 0x38 });
         set(color::Background1, { 0x0B, 0x06, 0x04, 0xFF });
     }
@@ -345,6 +585,7 @@ namespace {
             switch (recomp::select_rom(path, game_id)) {
                 case recomp::RomValidationError::Good: {
                     const std::string title = rom_title(stored_rom_path(game_id));
+                    rom_button_name = button_name(title);
                     recompui::ContextId context = recompui::get_launcher_context_id();
                     const bool opened = context.open_if_not_already();
                     option->set_title(title);
@@ -368,6 +609,7 @@ namespace {
         const recomp::GameEntry& game = supported_games[0];
         menu->remove_default_title();
         add_posters(menu);
+        add_settings_backdrop();
         // recompui's UI exists now: the FPS counter can make its own.
         conker::fps_counter::on_ui_ready();
         conker::crosshair::on_ui_ready();
@@ -389,9 +631,15 @@ namespace {
         recompui::GameOption* entries[] = {
             start_option, controls_option, settings_option, mods_option, rom_option, options->add_exit_option(),
         };
-        for (recompui::GameOption* entry : entries) {
-            entry->set_font_family(title_font);
-            entry->set_letter_spacing(1.5f);
+        launcher_game_id = game.game_id;
+        rom_button_name = button_name(rom_title(stored_rom_path(game.game_id)));
+        load_button_pictures();
+        menu_buttons.clear();
+        const std::string names[] = { "start_game", "controls", "settings", "mods", rom_button_name, "exit" };
+        for (size_t i = 0; i < std::size(entries); i++) {
+            entries[i]->set_font_family(title_font);
+            entries[i]->set_letter_spacing(1.5f);
+            add_button_picture(entries[i], names[i]);
         }
     }
 

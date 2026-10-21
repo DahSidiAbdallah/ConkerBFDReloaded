@@ -73,3 +73,705 @@ index a7954c7..fb286c7 100644
          return false;
      }
  
+diff --git a/recompui/include/recompui/config.h b/recompui/include/recompui/config.h
+index 38b84f5..a1a43ff 100644
+--- a/recompui/include/recompui/config.h
++++ b/recompui/include/recompui/config.h
+@@ -134,6 +134,9 @@ namespace recompui {
+         void set_tab_visible(const std::string &id, bool is_visible);
+ 
+         void set_tab(const std::string &id);
++        // A picture behind the settings (an image source, e.g. one queued with queue_image_from_bytes_file).
++        // Call before the menus are created.
++        void set_backdrop(const std::string &src);
+         void open();
+         bool close();
+ 
+diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
+index 6c84c05..bda7f61 100644
+--- a/recompui/src/config/ui_config.cpp
++++ b/recompui/src/config/ui_config.cpp
+@@ -19,6 +19,7 @@ static bool loaded_configs = false;
+ 
+ namespace recompui {
+     static recompui::TabbedModal *config_modal = nullptr;
++    static std::string backdrop_src;
+ 
+     recomp::config::Config &config::get_config(const std::string &id) {
+         for (auto &[config_id, config] : configs) {
+@@ -63,8 +64,8 @@ namespace recompui {
+             name,
+             id,
+             // Create contents
+-            [id](recompui::ContextId context, Element* parent) {
+-                context.create_element<ConfigPageOptionsMenu>(parent, get_config_ptr(id), true);
++            [id, name](recompui::ContextId context, Element* parent) {
++                context.create_element<ConfigPageOptionsMenu>(parent, get_config_ptr(id), true)->set_title(name);
+             },
+             // Can close
+             [id, name](TabCloseContext close_context) {
+@@ -135,6 +136,10 @@ namespace recompui {
+         }
+     }
+ 
++    void config::set_backdrop(const std::string &src) {
++        backdrop_src = src;
++    }
++
+     void config::init_modal() {
+         if (!loaded_configs) {
+             throw std::runtime_error("Configurations have not been loaded. Call recompui::config::finalize() first.");
+@@ -152,6 +157,9 @@ namespace recompui {
+                 config_modal->set_tab_visible(tab.id, false);
+             }
+         }
++        if (!backdrop_src.empty()) {
++            config_modal->set_backdrop(backdrop_src);
++        }
+         config_modal->set_selected_tab(0);
+         auto header_right = config_modal->get_header()->get_right();
+         auto quit_button = config_modal->modal_root_context.create_element<IconButton>(header_right, "icons/Quit.svg", ButtonStyle::Basic);
+diff --git a/recompui/src/config/ui_config_option.cpp b/recompui/src/config/ui_config_option.cpp
+index 86428c9..a037286 100644
+--- a/recompui/src/config/ui_config_option.cpp
++++ b/recompui/src/config/ui_config_option.cpp
+@@ -1,4 +1,5 @@
+ #include "ui_config_option.h"
++#include "elements/ui_conker_look.h"
+ 
+ namespace recompui {
+ 
+@@ -38,6 +39,9 @@ ConfigOptionElement::ConfigOptionElement(
+     auto name_text = option.name;
+     if (!name_text.empty()) {
+         name_label = context.create_element<Label>(this, name_text, theme::Typography::LabelMD);
++        conker_look::letters(name_label, 24.0f);
++        name_label->add_class("conker-name");
++        name_label->set_color(conker_look::gold);
+         name_label->set_margin_bottom(8.0f);
+     } else {
+         name_label = context.create_element<Label>(this, "", theme::Typography::LabelMD);
+@@ -87,6 +91,10 @@ void ConfigOptionElement::process_event(const Event &e) {
+     }
+ }
+ 
++void ConfigOptionElement::set_highlighted(bool highlighted) {
++    name_label->set_color(highlighted ? conker_look::orange : conker_look::gold);
++}
++
+ void ConfigOptionElement::update_hidden() {
+     if (config->is_config_option_hidden(option_index)) {
+         set_display(Display::None);
+@@ -282,23 +290,31 @@ ConfigOptionBool::ConfigOptionBool(
+     // Negates the extra padding that text inputs automatically add.
+     name_label->set_margin_bottom(4.0f);
+ 
++    // Off and On as two pill rings, like the other choices.
+     ContextId context = recompui::get_current_context();
+-    toggle = context.create_element<Toggle>(this, ToggleSize::Medium);
++    choice = context.create_element<Radio>(this);
++    choice->add_option("Off");
++    choice->add_option("On");
++    choice->set_focus_callback([this](bool active) {
++        if (active) {
++            this->on_hover(this->option_id);
++        }
++    });
+ 
+     update_value();
+-    toggle->add_checked_callback([this](bool checked){
+-        this->set_option_value(this->option_id, checked);
++    choice->add_index_changed_callback([this](uint32_t index) {
++        this->set_option_value(this->option_id, index == 1);
+     });
+ };
+ 
+ void ConfigOptionBool::update_value() {
+     bool value = std::get<bool>(get_value());
+-    toggle->set_checked(value);
++    choice->set_index(value ? 1 : 0);
+ };
+ 
+ void ConfigOptionBool::update_disabled() {
+     bool disabled = get_disabled();
+-    toggle->set_enabled(!disabled);
++    choice->set_enabled(!disabled);
+ };
+ 
+ } // namespace recompui
+diff --git a/recompui/src/config/ui_config_option.h b/recompui/src/config/ui_config_option.h
+index 0561657..c29a6dd 100644
+--- a/recompui/src/config/ui_config_option.h
++++ b/recompui/src/config/ui_config_option.h
+@@ -42,6 +42,8 @@ namespace recompui {
+         virtual void update_value() = 0;
+         virtual void update_disabled() = 0;
+         void update_hidden();
++        // The option you're on: its name in orange.
++        void set_highlighted(bool highlighted);
+         const std::string &get_option_id() { return option_id; }
+     };
+ 
+@@ -111,7 +113,7 @@ public:
+ 
+ class ConfigOptionBool : public ConfigOptionElement {
+ protected:
+-    Toggle *toggle = nullptr;
++    Radio *choice = nullptr;
+ 
+     std::string_view get_type_name() override { return "ConfigOptionBool"; }
+ public:
+diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
+index f379a6f..5606550 100644
+--- a/recompui/src/config/ui_config_page_controls.cpp
++++ b/recompui/src/config/ui_config_page_controls.cpp
+@@ -6,6 +6,7 @@
+ #include "elements/ui_container.h"
+ #include "elements/ui_binding_button.h"
+ #include "elements/ui_select.h"
++#include "elements/ui_conker_look.h"
+ #include "recompinput/profiles.h"
+ #include "recompui/config.h"
+ 
+@@ -63,6 +64,9 @@ GameInputRow::GameInputRow(
+     set_debug_id("GameInputRow (" + input_ctx.name + ")");
+ 
+     auto label = context.create_element<Label>(this, input_ctx.name, theme::Typography::LabelMD);
++    conker_look::letters(label, 24.0f);
++    label->add_class("conker-name");
++    label->set_color(conker_look::gold);
+     label->set_flex_grow(2.0f);
+     label->set_flex_shrink(1.0f);
+     label->set_flex_basis(300.0f);
+@@ -356,6 +360,10 @@ void ConfigPageControls::render_body_mappings() {
+     {
+         body->get_right()->clear_children();
+         description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
++        conker_look::letters(description_container, 21.0f);
++        description_container->add_class("conker-name");
++        description_container->set_color(conker_look::gold);
++        description_container->set_line_height(30.0f);
+         description_container->set_text("");
+     }
+ }
+diff --git a/recompui/src/config/ui_config_page_options_menu.cpp b/recompui/src/config/ui_config_page_options_menu.cpp
+index 6ba64e2..882082a 100644
+--- a/recompui/src/config/ui_config_page_options_menu.cpp
++++ b/recompui/src/config/ui_config_page_options_menu.cpp
+@@ -1,4 +1,5 @@
+ #include "ui_config_page_options_menu.h"
++#include "elements/ui_conker_look.h"
+ 
+ 
+ namespace recompui {
+@@ -16,10 +17,42 @@ ConfigPageOptionsMenu::ConfigPageOptionsMenu(
+     set_as_navigation_container(NavigationType::Vertical);
+ 
+     render_config_options();
+-    description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
++
++    // The description: the option's name in red over a white speech bubble.
++    description_box = context.create_element<Element>(body->get_right(), 0, "div", false);
++    description_box->set_padding(24.0f);
++    description_heading = context.create_element<Label>(description_box, "", theme::Typography::Header3);
++    conker_look::letters(description_heading, 38.0f);
++    description_heading->add_class("conker-heading");
++    description_heading->set_color(conker_look::red);
++    description_heading->set_margin_bottom(14.0f);
++    Element *bubble = context.create_element<Element>(description_box, 0, "div", false);
++    bubble->set_position(Position::Relative);
++    bubble->set_background_color(conker_look::white);
++    bubble->set_border_width(3.0f);
++    bubble->set_border_color(conker_look::black);
++    bubble->set_border_radius(28.0f);
++    bubble->set_padding_top(20.0f);
++    bubble->set_padding_bottom(20.0f);
++    bubble->set_padding_left(28.0f);
++    bubble->set_padding_right(28.0f);
++    Element *tail = context.create_element<Element>(bubble, 0, "div", false);
++    tail->set_position(Position::Absolute);
++    tail->set_left(-14.0f);
++    tail->set_top(30.0f);
++    tail->set_width(24.0f);
++    tail->set_height(24.0f);
++    tail->set_background_color(conker_look::white);
++    tail->set_border_left_width(3.0f);
++    tail->set_border_bottom_width(3.0f);
++    tail->set_border_color(conker_look::black);
++    tail->set_rotation(45.0f);
++    description_container = context.create_element<Element>(bubble, 0, "p", true);
++    description_container->set_position(Position::Relative);
+     description_container->set_typography(theme::Typography::Body);
+-    description_container->set_line_height(28.0f);
+-    description_container->set_padding(8.0f);
++    conker_look::letters(description_container, 21.0f);
++    description_container->set_color(conker_look::black);
++    description_container->set_line_height(30.0f);
+     set_description_text("");
+ 
+     if (config->requires_confirmation) {
+@@ -29,6 +62,9 @@ ConfigPageOptionsMenu::ConfigPageOptionsMenu(
+ }
+ 
+ void ConfigPageOptionsMenu::set_description_text(const std::string &text) {
++    if (description_box) {
++        description_box->set_display(text.empty() ? Display::None : Display::Block);
++    }
+     if (description_container) {
+         if (is_internal) {
+             description_container->set_text_unsafe(text);
+@@ -105,6 +141,9 @@ void ConfigPageOptionsMenu::process_event(const Event &e) {
+         bool active = std::get<EventHover>(e.variant).active;
+         if (!active) {
+             set_description_text("");
++            for (auto *element : config_option_elements) {
++                element->set_highlighted(false);
++            }
+         }
+         break;
+     }
+@@ -173,6 +212,14 @@ void ConfigPageOptionsMenu::render_config_options() {
+         body_left_scroll->set_overflow_y(Overflow::Auto);
+         body_left_scroll->set_as_navigation_container(NavigationType::Vertical);
+ 
++        // The page's title, glossy purple with a gold rim (set_title).
++        title_label = context.create_element<Label>(body_left_scroll, "", theme::Typography::Header1);
++        conker_look::letters(title_label, 58.0f);
++        title_label->add_class("conker-title");
++        title_label->set_color(conker_look::purple);
++        title_label->set_text_align(TextAlign::Center);
++        set_title(title_text);
++
+         config_option_elements.clear();
+         bound_on_option_hover = [this](const std::string &option_id) {
+             this->on_option_hover(option_id);
+@@ -240,9 +287,21 @@ void ConfigPageOptionsMenu::render_config_options() {
+     }
+ }
+ 
++void ConfigPageOptionsMenu::set_title(const std::string &text) {
++    title_text = text;
++    if (title_label) {
++        title_label->set_text(text);
++        title_label->set_display(text.empty() ? Display::None : Display::Block);
++    }
++}
++
+ void ConfigPageOptionsMenu::on_option_hover(const std::string &option_id) {
++    for (auto *element : config_option_elements) {
++        element->set_highlighted(element->get_option_id() == option_id);
++    }
+     if (description_container) {
+         description_option_id = option_id;
++        description_heading->set_text(config->get_option(option_id).name);
+         set_description_text(config->get_option(option_id).description);
+     }
+ }
+diff --git a/recompui/src/config/ui_config_page_options_menu.h b/recompui/src/config/ui_config_page_options_menu.h
+index 49e05db..ae7c2e6 100644
+--- a/recompui/src/config/ui_config_page_options_menu.h
++++ b/recompui/src/config/ui_config_page_options_menu.h
+@@ -15,6 +15,10 @@ namespace recompui {
+ 
+         std::vector<ConfigOptionElement*> config_option_elements;
+         Element *description_container = nullptr;
++        Element *description_box = nullptr;
++        Label *description_heading = nullptr;
++        Label *title_label = nullptr;
++        std::string title_text;
+         std::string description_option_id = "";
+         Button *apply_button = nullptr;
+ 
+@@ -39,5 +43,6 @@ namespace recompui {
+             bool is_internal = false
+         );
+         virtual ~ConfigPageOptionsMenu() = default;
++        void set_title(const std::string &text);
+     };
+ } // namespace recompui
+diff --git a/recompui/src/elements/ui_conker_look.h b/recompui/src/elements/ui_conker_look.h
+new file mode 100644
+index 0000000..64c0eed
+--- /dev/null
++++ b/recompui/src/elements/ui_conker_look.h
+@@ -0,0 +1,47 @@
++#ifndef RECOMPUI_CONKER_LOOK_H
++#define RECOMPUI_CONKER_LOOK_H
++
++#include "ui_element.h"
++
++// Conker's own menu look for the settings: see-through pill rings (orange-red when chosen, dark steel
++// otherwise), gold names, orange for what is chosen. Outlines and shadows: conker-* classes in recomp.rcss.
++namespace recompui::conker_look {
++    constexpr const char *font = "Luckiest Guy";
++    constexpr Color gold{ 0xF7, 0xC9, 0x48, 0xFF };
++    constexpr Color orange{ 0xFF, 0x93, 0x2B, 0xFF };
++    constexpr Color ring{ 0xEE, 0x4E, 0x14, 0xFF };
++    constexpr Color steel{ 0x55, 0x5A, 0x62, 0xFF };
++    constexpr Color brown{ 0x9C, 0x4A, 0x1C, 0xFF };
++    constexpr Color brown_lit{ 0xC9, 0x6C, 0x2C, 0xFF };
++    constexpr Color red{ 0xD8, 0x2A, 0x14, 0xFF };
++    constexpr Color purple{ 0x6E, 0x3C, 0xB0, 0xFF };
++    constexpr Color track{ 0x26, 0x28, 0x2C, 0xFF };
++    constexpr Color knob{ 0xE6, 0xE8, 0xEC, 0xFF };
++    constexpr Color white{ 0xFF, 0xFF, 0xFF, 0xFF };
++    constexpr Color black{ 0x00, 0x00, 0x00, 0xFF };
++
++    // Letters in Conker's font (it has no bold face).
++    inline void letters(Style *style, float size) {
++        style->set_font_family(font);
++        style->set_font_weight(400);
++        style->set_font_size(size);
++        style->set_letter_spacing(0.0f);
++    }
++
++    // A pill ring around the letters, not chosen yet.
++    inline void pill(Element *element, float size) {
++        letters(element, size);
++        element->add_class("conker-pill");
++        element->set_white_space(WhiteSpace::Nowrap);
++        element->set_border_width(3.0f);
++        element->set_border_radius(size);
++        element->set_border_color(steel);
++        element->set_color(brown);
++        element->set_padding_top(size * 0.22f);
++        element->set_padding_bottom(size * 0.08f);
++        element->set_padding_left(size * 0.6f);
++        element->set_padding_right(size * 0.6f);
++    }
++}
++
++#endif
+diff --git a/recompui/src/elements/ui_element.cpp b/recompui/src/elements/ui_element.cpp
+index 4517152..9660189 100644
+--- a/recompui/src/elements/ui_element.cpp
++++ b/recompui/src/elements/ui_element.cpp
+@@ -326,6 +326,10 @@ void Element::ProcessEvent(Rml::Event &event) {
+     }
+ }
+ 
++void Element::add_class(const std::string& name) {
++    base->SetClass(name, true);
++}
++
+ void Element::set_attribute(const Rml::String &attribute_key, const Rml::String &attribute_value) {
+     base->SetAttribute(attribute_key, attribute_value);
+ }
+diff --git a/recompui/src/elements/ui_element.h b/recompui/src/elements/ui_element.h
+index 34eec3f..2adc6cc 100644
+--- a/recompui/src/elements/ui_element.h
++++ b/recompui/src/elements/ui_element.h
+@@ -84,6 +84,7 @@ private:
+     void propagate_disabled(bool disabled);
+     void handle_event(const Event &e);
+     void set_id(const std::string& new_id);
++
+     void set_as_root_document(NavigationType nav_type = NavigationType::Vertical);
+ 
+     // Style overrides.
+@@ -107,6 +108,8 @@ protected:
+     virtual void set_input_value(const ElementValue&) {}
+     virtual std::string_view get_type_name() { return "Element"; }
+ public:
++    // Adds an RCSS class (styles from recomp.rcss).
++    void add_class(const std::string& name);
+     // Used for backwards compatibility with legacy UI elements.
+     Element(ResourceId rid, Rml::Element *base);
+ 
+diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
+index b057f46..a17068c 100644
+--- a/recompui/src/elements/ui_modal.cpp
++++ b/recompui/src/elements/ui_modal.cpp
+@@ -1,6 +1,8 @@
+ #include "ui_modal.h"
+ #include "ui_element.h"
+ #include "ui_document.h"
++#include "ui_image.h"
++#include "ultramodern/ultramodern.hpp"
+ #include "recompinput/recompinput.h"
+ #include "recompinput/profiles.h"
+ 
+@@ -60,6 +62,15 @@ Modal::Modal(
+ 
+     modal_overlay = context.create_element<ModalOverlay>(this);
+ 
++    // A picture behind everything (set_backdrop), hidden until there is one.
++    backdrop = context.create_element<Element>(modal_overlay);
++    backdrop->set_display(Display::None);
++    backdrop->set_position(Position::Absolute);
++    backdrop->set_top(0);
++    backdrop->set_right(0);
++    backdrop->set_bottom(0);
++    backdrop->set_left(0);
++
+     Element* modal_whole_page_wrapper = context.create_element<Element>(modal_overlay);
+     modal_whole_page_wrapper->set_display(Display::Flex);
+     modal_whole_page_wrapper->set_position(Position::Absolute);
+@@ -110,10 +121,29 @@ Modal::Modal(
+     }, "Close");
+ }
+ 
++void Modal::set_backdrop(const std::string &src) {
++    bool opened = modal_root_context.open_if_not_already();
++    Image *image = modal_root_context.create_element<Image>(backdrop, src);
++    image->set_width(100.0f, Unit::Percent);
++    image->set_height(100.0f, Unit::Percent);
++    has_backdrop = true;
++    modal_element->set_background_color(Color{ 0, 0, 0, 0 });
++    modal_element->set_border_width(0.0f);
++    if (opened) {
++        modal_root_context.close();
++    }
++}
++
+ Modal::~Modal() {
+ }
+ 
+ void Modal::open() {
++    if (has_backdrop) {
++        // The picture only before the game starts: in the game, the game shows darkened behind.
++        bool show = !ultramodern::is_game_started();
++        backdrop->set_display(show ? Display::Block : Display::None);
++        modal_overlay->set_background_color(show ? Color{ 0, 0, 0, 255 } : Color{ 0x0B, 0x06, 0x04, 0xD0 });
++    }
+     if (!recompui::is_context_shown(modal_root_context)) {
+         recompui::show_context(modal_root_context, "");
+     }
+diff --git a/recompui/src/elements/ui_modal.h b/recompui/src/elements/ui_modal.h
+index d065a14..f9854b9 100644
+--- a/recompui/src/elements/ui_modal.h
++++ b/recompui/src/elements/ui_modal.h
+@@ -65,6 +65,8 @@ namespace recompui {
+         Element *modal_element = nullptr;
+         ConfigHeaderFooter *header = nullptr;
+         Element *modal_overlay = nullptr;
++        Element *backdrop = nullptr;
++        bool has_backdrop = false;
+         Element *body = nullptr;
+         Element *menu_actions_wrapper = nullptr;
+         ModalType modal_type;
+@@ -93,6 +95,9 @@ namespace recompui {
+         // Adds a callback for MenuAction events. Description is shown under the modal if provided.
+         void set_menu_action_callback(MenuAction action, std::function<void()> callback, std::string description = "");
+         void remove_menu_action_callback(MenuAction action);
++        // Shows a picture (an image source) behind the modal before the game starts (in the game: the game,
++        // darkened); the modal then has no panel of its own.
++        void set_backdrop(const std::string &src);
+         void render_menu_actions();
+     };
+ 
+diff --git a/recompui/src/elements/ui_radio.cpp b/recompui/src/elements/ui_radio.cpp
+index 7e5c18d..45eb751 100644
+--- a/recompui/src/elements/ui_radio.cpp
++++ b/recompui/src/elements/ui_radio.cpp
+@@ -1,6 +1,7 @@
+ #include "overloaded.h"
+ #include "ui_radio.h"
+ #include "ui_utils.h"
++#include "ui_conker_look.h"
+ 
+ namespace recompui {
+ 
+@@ -13,19 +14,15 @@ namespace recompui {
+         set_text(name);
+         set_cursor(Cursor::Pointer);
+         set_typography(theme::Typography::LabelSM);
+-        set_border_color(theme::color::Text, 0);
+-        set_border_bottom_width(theme::border::width);
+-        set_color(theme::color::TextInactive);
+-        set_padding_top(8.0f);
+-        set_padding_bottom(8.0f - theme::border::width);
++        conker_look::pill(this, 18.0f);
+         set_text_transform(TextTransform::Uppercase);
+         set_height_auto();
+         set_opacity(1.0f);
+-        hover_style.set_color(theme::color::WhiteA80);
+-        checked_style.set_color(theme::color::White);
+-        checked_style.set_border_color(theme::color::Text);
++        hover_style.set_color(conker_look::brown_lit);
++        checked_style.set_color(conker_look::orange);
++        checked_style.set_border_color(conker_look::ring);
+         pulsing_style.set_border_color(theme::color::SecondaryA80);
+-        disabled_style.set_color(theme::color::TextInactive);
++        disabled_style.set_color(conker_look::brown);
+         disabled_style.set_opacity(0.5f);
+         disabled_style.set_cursor(Cursor::None);
+ 
+@@ -127,7 +124,9 @@ namespace recompui {
+     }
+ 
+     Radio::Radio(ResourceId rid, Element *parent) : Container(rid, parent, FlexDirection::Row, JustifyContent::FlexStart, Events(EventType::Focus, EventType::Update, EventType::Enable)) {
+-        set_gap(24.0f);
++        set_gap(8.0f);
++        set_flex_wrap(FlexWrap::Wrap); // long rows go on to a second line
++        set_width(100.0f, Unit::Percent); // (else it wraps at its own narrow width)
+         set_align_items(AlignItems::FlexStart);
+         // enable_focus();
+         set_as_navigation_container(NavigationType::Horizontal);
+diff --git a/recompui/src/elements/ui_slider.cpp b/recompui/src/elements/ui_slider.cpp
+index 7a50da4..a37eb77 100644
+--- a/recompui/src/elements/ui_slider.cpp
++++ b/recompui/src/elements/ui_slider.cpp
+@@ -1,6 +1,7 @@
+ #include "overloaded.h"
+ #include "ui_slider.h"
+ #include "ui_utils.h"
++#include "ui_conker_look.h"
+ 
+ #include <cmath>
+ #include <charconv>
+@@ -47,6 +48,7 @@ namespace recompui {
+     void Slider::update_circle_position() {
+         double ratio = std::clamp((value - min_value) / (max_value - min_value), 0.0, 1.0);
+         circle_element->set_left(ratio * 100.0, Unit::Percent);
++        fill_element->set_width(ratio * 100.0, Unit::Percent);
+     }
+ 
+     void Slider::update_label_text() {
+@@ -93,7 +95,7 @@ namespace recompui {
+                     queue_update();
+                 }
+                 else {
+-                    circle_element->set_background_color(theme::color::TextDim);
++                    circle_element->set_background_color(conker_look::knob);
+                 }
+             }
+             else {
+@@ -119,7 +121,7 @@ namespace recompui {
+                 if (enable_active) {
+                     set_cursor(Cursor::Pointer);
+                     set_focusable(true);
+-                    circle_element->set_background_color(theme::color::TextDim);
++                    circle_element->set_background_color(conker_look::knob);
+                 }
+                 else {
+                     set_cursor(Cursor::None);
+@@ -149,6 +151,9 @@ namespace recompui {
+         ContextId context = get_current_context();
+ 
+         value_label = context.create_element<Label>(this, "0", LabelStyle::Small);
++        conker_look::letters(value_label, 18.0f);
++        value_label->add_class("conker-name");
++        value_label->set_color(conker_look::gold);
+         value_label->set_margin_right(20.0f);
+         value_label->set_min_width(60.0f);
+         value_label->set_max_width(60.0f);
+@@ -161,21 +166,34 @@ namespace recompui {
+         {
+             bar_element = context.create_element<Clickable>(slider_element, true);
+             bar_element->set_width(100.0f, Unit::Percent);
+-            bar_element->set_height(2.0f);
+-            bar_element->set_margin_top(8.0f);
+-            bar_element->set_background_color(theme::color::WhiteA20);
++            bar_element->set_position(Position::Relative);
++            bar_element->set_height(10.0f);
++            bar_element->set_margin_top(5.0f);
++            bar_element->set_background_color(conker_look::track);
++            bar_element->set_border_radius(5.0f);
+             bar_element->add_pressed_callback([this](float x, float y){ bar_pressed(x, y); focus(); });
+             bar_element->add_dragged_callback([this](float x, float y, recompui::DragPhase phase){ bar_dragged(x, y, phase); focus(); });
+             
++            // The part up to the knob, orange.
++            fill_element = context.create_element<Element>(bar_element, 0, "div", false);
++            fill_element->set_position(Position::Absolute);
++            fill_element->set_top(0.0f);
++            fill_element->set_left(0.0f);
++            fill_element->set_height(10.0f);
++            fill_element->set_background_color(conker_look::ring);
++            fill_element->set_border_radius(5.0f);
++
+             circle_element = context.create_element<Clickable>(bar_element, true);
+             circle_element->set_position(Position::Relative);
+-            circle_element->set_width(16.0f);
+-            circle_element->set_height(16.0f);
+-            circle_element->set_margin_top(-7.0f);
+-            circle_element->set_margin_right(-8.0f);
+-            circle_element->set_margin_left(-8.0f);
+-            circle_element->set_background_color(theme::color::TextDim);
+-            circle_element->set_border_radius(theme::border::radius_sm);
++            circle_element->set_width(22.0f);
++            circle_element->set_height(22.0f);
++            circle_element->set_margin_top(-6.0f);
++            circle_element->set_margin_right(-11.0f);
++            circle_element->set_margin_left(-11.0f);
++            circle_element->set_border_width(3.0f);
++            circle_element->set_border_color(conker_look::black);
++            circle_element->set_background_color(conker_look::knob);
++            circle_element->set_border_radius(11.0f);
+             circle_element->add_pressed_callback([this](float, float){ focus(); });
+             circle_element->add_dragged_callback([this](float x, float y, recompui::DragPhase phase){ circle_dragged(x, y, phase); focus(); });
+             circle_element->set_cursor(Cursor::Pointer);
+diff --git a/recompui/src/elements/ui_slider.h b/recompui/src/elements/ui_slider.h
+index 4d8c41e..aa2e939 100644
+--- a/recompui/src/elements/ui_slider.h
++++ b/recompui/src/elements/ui_slider.h
+@@ -18,6 +18,7 @@ namespace recompui {
+         Clickable *slider_element = nullptr;
+         Clickable *bar_element = nullptr;
+         Clickable *circle_element = nullptr;
++        Element *fill_element = nullptr;
+         double value = 50.0;
+         double min_value = 0.0;
+         double max_value = 100.0;
+diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
+index 2c5dc52..dd6d3b6 100644
+--- a/recompui/src/elements/ui_tab_set.cpp
++++ b/recompui/src/elements/ui_tab_set.cpp
+@@ -1,5 +1,6 @@
+ #include "ui_tab_set.h"
+ #include "ui_utils.h"
++#include "ui_conker_look.h"
+ 
+ namespace recompui {
+ 
+@@ -11,21 +12,18 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
+     set_visible(true);
+     set_position(Position::Relative);
+     set_margin(0);
+-    set_padding_top(tab_vertical_padding);
+-    set_padding_bottom(tab_vertical_padding);
+-    set_padding_left(tab_horizontal_padding);
+-    set_padding_right(tab_horizontal_padding);
++    conker_look::pill(this, 22.0f);
+     set_focusable(true);
+     set_tab_index_auto();
+     set_cursor(Cursor::Pointer);
+ 
+-    set_color(theme::color::TextInactive);
+     set_background_color(theme::color::Transparent);
+     set_opacity(1.0f);
+ 
+-    hover_style.set_color(theme::color::WhiteA80);
+-    checked_style.set_color(theme::color::White);
+-    pulsing_style.set_color(theme::color::WhiteA80);
++    hover_style.set_color(conker_look::brown_lit);
++    checked_style.set_color(conker_look::orange);
++    checked_style.set_border_color(conker_look::ring);
++    pulsing_style.set_color(conker_look::brown_lit);
+ 
+     disabled_style.set_cursor(Cursor::None);
+     disabled_style.set_color(theme::color::TextDim);
+@@ -33,9 +31,11 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
+ 
+     ContextId context = get_current_context();
+     label = context.create_element<Label>(this, std::string{text}, theme::Typography::Header3);
++    conker_look::letters(label, 22.0f);
++    label->set_text_transform(TextTransform::Uppercase);
+ 
+     indicator = context.create_element<Element>(this, 0, "div", false);
+-    indicator->set_display(Display::Block);
++    indicator->set_display(Display::None); // the chosen tab has its ring instead
+     indicator->set_position(Position::Absolute);
+     indicator->set_height(2.0f);
+     indicator->set_bottom(2.0f);
+@@ -116,8 +116,8 @@ TabSet::TabSet(ResourceId rid, Element *parent) :
+     set_display(Display::Flex);
+     set_flex_direction(FlexDirection::Row);
+     set_justify_content(JustifyContent::FlexStart);
+-    set_align_items(AlignItems::Stretch);
+-    set_gap(0.0f);
++    set_align_items(AlignItems::Center);
++    set_gap(6.0f);
+     set_as_navigation_container(NavigationType::Horizontal);
+ }
+ 

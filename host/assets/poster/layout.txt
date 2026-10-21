@@ -1,4 +1,5 @@
 2560 1440
+base.png 0 0 2560 1440 base
 panel_00.png 17 17 618 515 sunflower
 panel_01.png 17 510 638 541 poo
 panel_02.png 17 1029 655 395 catfish
