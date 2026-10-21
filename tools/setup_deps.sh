@@ -36,6 +36,7 @@ patch_in "$D/RecompFrontend/recompui/lib/RmlUi" "$P/rmlui.patch"
 patch_in "$D/RecompFrontend" "$P/recompfrontend_conker.patch"
 patch_in "$D/RecompFrontend" "$P/recompfrontend.patch"
 patch_in "$D/RecompFrontend" "$P/recompfrontend_keyprompts.patch"
+patch_in "$D/RecompFrontend" "$P/recompfrontend_filedialog.patch"
 # RecompFrontend includes a header from ../patches next to the deps folder.
 [ -e "$D/../patches" ] || ln -s "$P" "$D/../patches"
 chmod +x "$D/rt64/src/contrib/dxc/bin/x64/dxc-linux"

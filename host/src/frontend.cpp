@@ -503,8 +503,13 @@ namespace {
 #endif
     }
 
+    void refresh_connected_controllers();
+
     void update_gfx(void*) {
         recompinput::handle_events();
+        // Both on the main thread, where SDL's device-index functions are used (see connected_ids).
+        conker::pad_mappings::update();
+        refresh_connected_controllers();
         conker::fps_counter::update();
         conker::crosshair::update();
         conker::qol::update();
@@ -782,6 +787,11 @@ namespace {
     std::mutex port_mutex;
     // The controllers holding ports 1-4, in the order they first pressed a button.
     std::vector<SDL_JoystickID> port_order;
+    // The game controllers plugged in, listed on the main thread by refresh_connected_controllers:
+    // SDL's device-index functions (SDL_NumJoysticks and the rest) aren't safe on two threads at once.
+    // Under sdl2-compat, what Linux distributions ship as SDL2, each call rebuilds one shared list, so
+    // the game thread reading it while a controller connects crashed (free(): unaligned chunk, issue #24).
+    std::vector<SDL_JoystickID> connected_ids;
 
     bool controller_any_button(SDL_GameController* controller) {
         for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++) {
@@ -794,18 +804,26 @@ namespace {
             SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16384;
     }
 
+    // Main thread, each frame after the events: lists the game controllers plugged in.
+    void refresh_connected_controllers() {
+        std::vector<SDL_JoystickID> ids;
+        const int num_joysticks = SDL_NumJoysticks();
+        for (int i = 0; i < num_joysticks; i++) {
+            if (SDL_IsGameController(i)) {
+                ids.push_back(SDL_JoystickGetDeviceInstanceID(i));
+            }
+        }
+        std::lock_guard lock{ port_mutex };
+        connected_ids = std::move(ids);
+    }
+
     // Updates the port order and fills `out` with the controllers holding ports, in port
     // order. Returns how many hold ports; `connected` gets how many controllers are open.
     int get_port_controllers(std::array<SDL_GameController*, max_ports>& out, int* connected = nullptr) {
         std::lock_guard lock{ port_mutex };
         // The controllers recompinput has opened.
         std::vector<std::pair<SDL_JoystickID, SDL_GameController*>> open;
-        int num_joysticks = SDL_NumJoysticks();
-        for (int i = 0; i < num_joysticks; i++) {
-            if (!SDL_IsGameController(i)) {
-                continue;
-            }
-            SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(i);
+        for (SDL_JoystickID id : connected_ids) {
             SDL_GameController* controller = SDL_GameControllerFromInstanceID(id);
             if (controller != nullptr) {
                 open.emplace_back(id, controller);
@@ -1050,7 +1068,6 @@ int conker::frontend::port_controllers(std::array<SDL_GameController*, max_ports
 
 void conker::frontend::on_vi() {
     conker::rumble::update();
-    conker::pad_mappings::update();
 }
 
 ultramodern::input::connected_device_info_t conker::frontend::device_info(int controller_num) {

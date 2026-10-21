@@ -1,0 +1,106 @@
+diff --git a/recompui/src/util/file.cpp b/recompui/src/util/file.cpp
+index 7ee84ed..2b3b5d2 100644
+--- a/recompui/src/util/file.cpp
++++ b/recompui/src/util/file.cpp
+@@ -15,12 +15,86 @@
+ #elif defined(__linux__)
+ #include <unistd.h>
+ #include <pwd.h>
++#include <sys/wait.h>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
+ #elif defined(__APPLE__)
+ #include "apple/rt64_apple.h"
+ #endif
+ 
+ namespace recompui {
++#if defined(__linux__)
++    // Conker: nfd's GTK picker ends the whole program (a Gtk-ERROR) when GTK couldn't start, e.g. when it
++    // can't reach the display, so check that first (NFD_Init retries until it works) and otherwise use the
++    // desktop's own picker program: kdialog on KDE (Bazzite, SteamOS), zenity elsewhere.
++    static bool gtk_dialogs_ready() {
++        if (NFD_Init() == NFD_OKAY) {
++            return true;
++        }
++        const char* error = NFD_GetError();
++        std::fprintf(stderr, "[file] GTK file picker unavailable: %s\n", error != nullptr ? error : "unknown error");
++        return false;
++    }
++
++    // Runs kdialog or zenity: 1 when a file was picked (paths in out_paths), 0 when cancelled, -1 when
++    // neither program could run.
++    static int run_picker_program(bool multiple, std::list<std::filesystem::path>& out_paths) {
++        const char* desktop = getenv("XDG_CURRENT_DESKTOP");
++        const bool kde = desktop != nullptr && std::strstr(desktop, "KDE") != nullptr;
++        const char* kdialog = multiple ? "exec kdialog --getopenfilename . --multiple --separate-output 2>/dev/null"
++                                       : "exec kdialog --getopenfilename . 2>/dev/null";
++        const char* zenity = multiple ? "exec zenity --file-selection --multiple --separator='\n' 2>/dev/null"
++                                      : "exec zenity --file-selection 2>/dev/null";
++        const char* commands[] = { kde ? kdialog : zenity, kde ? zenity : kdialog };
++        for (const char* command : commands) {
++            FILE* pipe = popen(command, "r");
++            if (pipe == nullptr) {
++                continue;
++            }
++            std::string output;
++            char buffer[4096];
++            size_t count;
++            while ((count = fread(buffer, 1, sizeof(buffer), pipe)) > 0) {
++                output.append(buffer, count);
++            }
++            const int status = pclose(pipe);
++            if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) >= 126) {
++                continue; // not installed, or couldn't start
++            }
++            if (WEXITSTATUS(status) != 0) {
++                return 0; // cancelled
++            }
++            size_t start = 0;
++            while (start < output.size()) {
++                size_t end = output.find('\n', start);
++                if (end == std::string::npos) {
++                    end = output.size();
++                }
++                if (end > start) {
++                    out_paths.emplace_back(std::filesystem::u8path(output.substr(start, end - start)));
++                }
++                start = end + 1;
++            }
++            return out_paths.empty() ? 0 : 1;
++        }
++        file::show_error_message_box("No file picker",
++            "Couldn't open a file picker: GTK couldn't start, and neither kdialog nor zenity is installed. "
++            "Install one of them (e.g. the zenity package) and try again.");
++        return -1;
++    }
++#endif
++
+     static void perform_file_dialog_operation(const std::function<void(bool, const std::filesystem::path&)>& callback) {
++#if defined(__linux__)
++        if (!gtk_dialogs_ready()) {
++            std::list<std::filesystem::path> paths;
++            const bool picked = run_picker_program(false, paths) == 1;
++            callback(picked, picked ? paths.front() : std::filesystem::path{});
++            return;
++        }
++#endif
+         nfdnchar_t* native_path = nullptr;
+         nfdresult_t result = NFD_OpenDialogN(&native_path, nullptr, 0, nullptr);
+ 
+@@ -36,6 +110,14 @@ namespace recompui {
+     }
+ 
+     static void perform_file_dialog_operation_multiple(const std::function<void(bool, const std::list<std::filesystem::path>&)>& callback) {
++#if defined(__linux__)
++        if (!gtk_dialogs_ready()) {
++            std::list<std::filesystem::path> paths;
++            const bool picked = run_picker_program(true, paths) == 1;
++            callback(picked, paths);
++            return;
++        }
++#endif
+         const nfdpathset_t* native_paths = nullptr;
+         nfdresult_t result = NFD_OpenDialogMultipleN(&native_paths, nullptr, 0, nullptr);
+ 

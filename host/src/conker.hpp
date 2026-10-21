@@ -120,7 +120,7 @@ namespace conker {
         void fix_all();
         // From SDL's event watch: a controller was connected (fixed at the next update).
         void on_device_added();
-        // Every VI: fixes the controllers connected since the last one.
+        // Main thread (update_gfx), each frame: fixes the controllers connected since the last one.
         void update();
     }
 

@@ -23,6 +23,7 @@ rem CBFD-Recompiled V0.1.4+: mouse buttons can be bound.
 call :patch "%D%\RecompFrontend" "%P%\recompfrontend.patch" || exit /b 1
 rem Ours: a texture folder the game makes itself (keyboard and mouse button prompts).
 call :patch "%D%\RecompFrontend" "%P%\recompfrontend_keyprompts.patch" || exit /b 1
+call :patch "%D%\RecompFrontend" "%P%\recompfrontend_filedialog.patch" || exit /b 1
 rem Our fix: this PC's Windows SDK (10.0.19041) lacks D3D12_HEAP_TYPE_GPU_UPLOAD.
 powershell -NoProfile -Command "$f='%D%\rt64\src\contrib\plume\plume_d3d12.cpp'; $t=[IO.File]::ReadAllText($f); $n=$t.Replace('return D3D12_HEAP_TYPE_GPU_UPLOAD;','return D3D12_HEAP_TYPE(5); // D3D12_HEAP_TYPE_GPU_UPLOAD, missing from older Windows SDKs'); [IO.File]::WriteAllText($f,$n)"
 echo DEPS OK
