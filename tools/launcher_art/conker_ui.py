@@ -5,6 +5,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 PALETTES={
  'green':dict(ring=((140,240,90),(20,110,10)), fill=((105,225,45),(25,130,10)), edge=((20,70,10),(5,30,4)), dim=((70,140,45),(30,80,20)), dimedge=((8,24,6),(2,10,2)), bar=(60,190,30)),
  'orange':dict(ring=((255,170,80),(190,40,0)), fill=((255,150,40),(205,40,0)), edge=((80,20,0),(35,6,0)), dim=((150,70,30),(85,30,10)), dimedge=((30,10,2),(12,4,0)), bar=(240,90,20)),
+ # 'soft': easier on the eyes (the launcher's buttons): the chosen pill filled orange with light letters,
+ # the others light letters in a steel ring.
+ 'soft':dict(ring=((255,192,125),(205,95,35)), fill=((255,250,240),(225,212,190)), edge=((70,30,8),(30,10,2)), dim=((238,230,214),(170,160,144)), dimedge=((22,18,14),(6,5,4)), bar=(200,86,26), pillfill=((224,114,42),(150,54,14))),
  'gold':dict(ring=((255,240,140),(170,110,10)), fill=((255,235,100),(210,130,10)), edge=((70,40,0),(30,15,0)), dim=((140,110,50),(80,60,20)), dimedge=((26,18,4),(10,6,0)), bar=(235,180,30), names=((255,255,255),(160,165,175))),
 }
 P_=PALETTES['green']
@@ -58,10 +61,16 @@ def pill(w, h, chosen, tilt=-4):
     big=Image.new('L',(w,h),0); d=ImageDraw.Draw(big)
     t=max(6,h//7)
     d.rounded_rectangle((t//2,t//2,w-t//2,h-t//2),h//2,outline=255,width=t)
+    if chosen and 'pillfill' in P_:
+        inner=Image.new('L',(w,h),0); ImageDraw.Draw(inner).rounded_rectangle((t,t,w-t,h-t),h//2-t,fill=255)
+        fillim=shade(inner,*P_['pillfill'],light=0.4)
+    else: fillim=None
     if chosen: ring=shade(big,*P_['ring'])
     else:      ring=shade(big,(150,155,160),(20,22,26))
     rim=Image.new('L',(w,h),0); ImageDraw.Draw(rim).rounded_rectangle((t//2-2,t//2-2,w-t//2+2,h-t//2+2),h//2,outline=255,width=t+4)
-    out=Image.new('RGBA',(w,h),(0,0,0,0)); out.paste((0,0,0,200),(0,0),rim); out.alpha_composite(ring)
+    out=Image.new('RGBA',(w,h),(0,0,0,0)); out.paste((0,0,0,200),(0,0),rim)
+    if fillim is not None: out.alpha_composite(fillim)
+    out.alpha_composite(ring)
     return out
 
 def button(text, size, chosen, seed=1, tilt=-4):

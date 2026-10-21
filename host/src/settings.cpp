@@ -278,7 +278,7 @@ namespace {
 
     // Launcher Poster's description, with a picture of the poster picked (Random: all of them, small). The
     // pictures (assets/menu/poster_preview_<n>.png) are loaded by frontend.cpp.
-    constexpr uint32_t launcher_posters = 11;
+    constexpr uint32_t launcher_posters = 9;
     std::string launcher_poster_about(uint32_t choice) {
         std::string about = "The picture behind the launcher's menu. It changes as soon as you pick one, and the picture "
             "below shows it.<br /><recomp-color primary>Current</recomp-color>: the collage of the game's moments. "
@@ -286,8 +286,7 @@ namespace {
             "<recomp-color primary>King</recomp-color>, <recomp-color primary>Chainsaw</recomp-color>, "
             "<recomp-color primary>Dollar Eyes</recomp-color>, <recomp-color primary>Panther King</recomp-color> and "
             "<recomp-color primary>Three Scenes</recomp-color>: scenes from the game's opening. "
-            "<recomp-color primary>Birdy</recomp-color>, <recomp-color primary>Sunflower</recomp-color>, "
-            "<recomp-color primary>Gregg</recomp-color> and <recomp-color primary>Berri</recomp-color>: the characters you meet. "
+            "<recomp-color primary>Gregg</recomp-color> and <recomp-color primary>Berri</recomp-color>: two of the characters you meet. "
             "<recomp-color primary>Random</recomp-color>: a different one each time you start.<br /><br />";
         if (choice < launcher_posters) {
             about += "<img src=\"?/conker/poster_preview_" + std::to_string(choice) + "\" style=\"width: 480dp; height: 270dp;\" />";
@@ -365,8 +364,7 @@ namespace {
         conker.add_enum_option("launcher_poster", "Launcher Poster", launcher_poster_about(0),
             { { 0u, "Current", "Current" }, { 1u, "Old", "Old" }, { 2u, "King", "King" }, { 3u, "Chainsaw", "Chainsaw" },
               { 4u, "DollarEyes", "Dollar Eyes" }, { 5u, "PantherKing", "Panther King" }, { 6u, "ThreeScenes", "Three Scenes" },
-              { 7u, "Birdy", "Birdy" }, { 8u, "Sunflower", "Sunflower" }, { 9u, "Gregg", "Gregg" }, { 10u, "Berri", "Berri" },
-              { 11u, "Random", "Random" } },
+              { 7u, "Gregg", "Gregg" }, { 8u, "Berri", "Berri" }, { 9u, "Random", "Random" } },
             0u);
         conker.add_option_change_callback("launcher_poster",
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {

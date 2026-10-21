@@ -101,7 +101,7 @@ while you hold, so you can't skip by accident. **Skip Intro** goes straight to t
 * Separate Music, Sound Effects and Speech volumes.
 * **Conker's Detail:** Conker stays on his most detailed model at any camera distance.
 * Pause when you alt-tab.
-* **Launcher Poster:** pick the launcher's picture from 11 designs (with a preview), or a random one each start.
+* **Launcher Poster:** pick the launcher's picture from 9 designs (with a preview), or a random one each start.
 
 #### Accessibility
 Toggle instead of hold for R-Look and crouch, walk with L (hold or toggle), **Ledge Grab** (catch the edge when

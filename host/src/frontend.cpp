@@ -90,9 +90,9 @@ namespace {
     constexpr float logo_seconds = 0.85f, logo_after = 0.35f; // after the last panel starts
 
     // The choices of Launcher Poster (settings.cpp) in order; the one after them, Random, picks one each start.
-    // (tools/launcher_art: hero_posters.py makes king..gregg, poster_previews.py their pictures for the setting.)
+    // (tools/launcher_art: hero_posters.py makes king..berri, poster_previews.py their pictures for the setting.)
     constexpr const char* poster_folders[] = { "poster", "poster_old", "poster_king", "poster_chainsaw", "poster_dollar",
-        "poster_panther", "poster_three", "poster_birdy", "poster_sunflower", "poster_gregg", "poster_berri" };
+        "poster_panther", "poster_three", "poster_gregg", "poster_berri" };
     recompui::Element* poster_holder = nullptr;
     uint32_t poster_choice = 0;   // the setting the poster shown follows
     size_t poster_shown = SIZE_MAX;
@@ -344,6 +344,12 @@ namespace {
             }
             buttons_shown = true;
             SDL_DelEventWatch(watch_intro_skip, nullptr);
+            // Testing aid: CONKER_TEST_SETTINGS=<tab id> opens the settings on that tab once the launcher is up,
+            // for screenshots without clicking.
+            if (const char* tab = std::getenv("CONKER_TEST_SETTINGS")) {
+                recompui::config::open();
+                recompui::config::set_tab(tab);
+            }
         }
     }
 
@@ -548,13 +554,13 @@ namespace {
         set(color::PrimaryA50, { 0xEE, 0x4E, 0x14, 0x80 });
         set(color::PrimaryA80, { 0xEE, 0x4E, 0x14, 0xCC });
         set(color::TextActive, cream);
-        set(color::Text, { 0xF7, 0xC9, 0x48, 0xFF });
-        set(color::TextA5, { 0xF7, 0xC9, 0x48, 0x0D });
-        set(color::TextA20, { 0xF7, 0xC9, 0x48, 0x33 });
-        set(color::TextA30, { 0xF7, 0xC9, 0x48, 0x4D });
-        set(color::TextA50, { 0xF7, 0xC9, 0x48, 0x80 });
-        set(color::TextA80, { 0xF7, 0xC9, 0x48, 0xCC });
-        set(color::TextDim, { 0xD8, 0xA2, 0x2E, 0xFF });
+        set(color::Text, { 0xF0, 0xD4, 0x8A, 0xFF });
+        set(color::TextA5, { 0xF0, 0xD4, 0x8A, 0x0D });
+        set(color::TextA20, { 0xF0, 0xD4, 0x8A, 0x33 });
+        set(color::TextA30, { 0xF0, 0xD4, 0x8A, 0x4D });
+        set(color::TextA50, { 0xF0, 0xD4, 0x8A, 0x80 });
+        set(color::TextA80, { 0xF0, 0xD4, 0x8A, 0xCC });
+        set(color::TextDim, { 0xC9, 0xAE, 0x6E, 0xFF });
         set(color::Elevated, { 0xF0, 0x7A, 0x1E, 0x38 });
         set(color::Background1, { 0x0B, 0x06, 0x04, 0xFF });
     }

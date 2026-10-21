@@ -87,6 +87,81 @@ index 38b84f5..a1a43ff 100644
          void open();
          bool close();
  
+diff --git a/recompui/src/composites/ui_mod_details_panel.cpp b/recompui/src/composites/ui_mod_details_panel.cpp
+index 88291e2..34e3f81 100644
+--- a/recompui/src/composites/ui_mod_details_panel.cpp
++++ b/recompui/src/composites/ui_mod_details_panel.cpp
+@@ -1,4 +1,5 @@
+ #include "ui_mod_details_panel.h"
++#include "elements/ui_conker_look.h"
+ 
+ #include "librecomp/mods.hpp"
+ 
+@@ -38,7 +39,12 @@ ModDetailsPanel::ModDetailsPanel(ResourceId rid, Element *parent) : Element(rid,
+         header_details_container->set_text_align(TextAlign::Left);
+         {
+             title_label = context.create_element<Label>(header_details_container, LabelStyle::Large);
++            conker_look::letters(title_label, 40.0f);
++            title_label->add_class("conker-name");
++            title_label->set_color(conker_look::gold);
+             version_label = context.create_element<Label>(header_details_container, LabelStyle::Normal);
++            conker_look::letters(version_label, 22.0f);
++            version_label->set_color(conker_look::brown);
+         }
+     }
+ 
+@@ -47,8 +53,13 @@ ModDetailsPanel::ModDetailsPanel(ResourceId rid, Element *parent) : Element(rid,
+     body_container->set_padding(16.0f);
+     {
+         authors_label = context.create_element<Label>(body_container, LabelStyle::Normal);
++        conker_look::letters(authors_label, 22.0f);
++        authors_label->set_color(conker_look::orange);
+         authors_label->set_margin_bottom(16.0f);
+         description_label = context.create_element<Label>(body_container, LabelStyle::Normal);
++        conker_look::letters(description_label, 21.0f);
++        description_label->set_color(conker_look::brown_lit);
++        description_label->set_line_height(30.0f);
+     }
+     
+     buttons_container = context.create_element<Container>(this, FlexDirection::Row, JustifyContent::SpaceAround);
+diff --git a/recompui/src/composites/ui_mod_menu.cpp b/recompui/src/composites/ui_mod_menu.cpp
+index 02455fd..694b612 100644
+--- a/recompui/src/composites/ui_mod_menu.cpp
++++ b/recompui/src/composites/ui_mod_menu.cpp
+@@ -6,6 +6,7 @@
+ #include "renderer.h"
+ #include "elements/ui_modal.h"
+ #include "elements/ui_button.h"
++#include "elements/ui_conker_look.h"
+ #include "config/ui_config_page_options_menu.h"
+ 
+ #include "librecomp/mods.hpp"
+@@ -58,9 +59,9 @@ ModEntryView::ModEntryView(ResourceId rid, Element *parent) : Element(rid, paren
+     set_cursor(Cursor::Pointer);
+     set_color(theme::color::Text);
+ 
+-    checked_style.set_border_color(theme::color::BorderSolid);
++    checked_style.set_border_color(conker_look::ring);
+     checked_style.set_color(theme::color::White);
+-    checked_style.set_background_color(recompui::theme::color::WhiteA20);
++    checked_style.set_background_color(Color{ conker_look::fill.r, conker_look::fill.g, conker_look::fill.b, 0x55 });
+     hover_style.set_border_color(theme::color::BorderHard);
+     checked_hover_style.set_border_color(theme::color::Text);
+     pulsing_style.set_border_color(theme::color::SecondaryA80);
+@@ -84,9 +85,12 @@ ModEntryView::ModEntryView(ResourceId rid, Element *parent) : Element(rid, paren
+ 
+         {
+             name_label = context.create_element<Label>(body_container, LabelStyle::Normal);
++            conker_look::letters(name_label, 26.0f);
++            name_label->add_class("conker-name");
++            name_label->set_color(conker_look::gold);
+             description_label = context.create_element<Label>(body_container, LabelStyle::Small);
+             description_label->set_margin_top(4.0f);
+-            description_label->set_color(theme::color::TextDim);
++            description_label->set_color(conker_look::brown);
+         } // body_container
+     } // this
+ 
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
 index 6c84c05..bda7f61 100644
 --- a/recompui/src/config/ui_config.cpp
@@ -389,27 +464,107 @@ index 49e05db..ae7c2e6 100644
 +        void set_title(const std::string &text);
      };
  } // namespace recompui
+diff --git a/recompui/src/elements/ui_button.cpp b/recompui/src/elements/ui_button.cpp
+index cf2a311..fa60a27 100644
+--- a/recompui/src/elements/ui_button.cpp
++++ b/recompui/src/elements/ui_button.cpp
+@@ -1,6 +1,7 @@
+ #include "ui_button.h"
+ #include "ui_label.h"
+ #include "ui_pseudo_border.h"
++#include "ui_conker_look.h"
+ 
+ #include <cassert>
+ 
+@@ -46,13 +47,14 @@ namespace recompui {
+         set_min_height(float_size_internal);
+         set_max_height(float_size_internal);
+ 
+-        set_border_width(theme::border::width);
+-        set_border_radius(theme::border::radius_md);
++        set_border_width(3.0f);
++        set_border_radius(float_size_internal * 0.5f);
++        add_class("conker-pill");
+ 
+         ContextId context = get_current_context();
+ 
+         auto focus_border = context.create_element<FocusBorder>(this, true);
+-        focus_border->set_border_radius(theme::border::radius_md + theme::border::width * 4.0f);
++        focus_border->set_border_radius(float_size_internal * 0.5f + theme::border::width * 4.0f);
+ 
+         switch (size) {
+             case ButtonSize::Small: {
+@@ -68,6 +70,9 @@ namespace recompui {
+                 break;
+         }
+ 
++        conker_look::letters(label, float_size_internal * 0.4f);
++        label->set_padding_top(float_size_internal * 0.06f);
++
+         set_cursor(Cursor::Pointer);
+         set_color(theme::color::Text);
+         set_tab_index(TabIndex::Auto);
+@@ -162,34 +167,8 @@ namespace recompui {
+         }
+     }
+ 
+-    void Button::apply_theme_style(recompui::theme::color color, bool is_basic) {
+-        uint8_t border_opacity = is_basic ? 0 : 204;
+-        uint8_t background_opacity = is_basic ? 0 : 13;
+-        uint8_t background_hover_opacity = 77;
+-        uint8_t border_hover_opacity = is_basic ? background_hover_opacity : 255;
+-
+-        if (color == theme::color::Elevated) {
+-            background_hover_opacity = theme::get_theme_color(theme::color::Elevated).a;
+-            if (is_basic) {
+-                border_hover_opacity = background_hover_opacity;
+-            } else {
+-                background_opacity = theme::get_theme_color(theme::color::ElevatedSoft).a;
+-                border_opacity = theme::get_theme_color(theme::color::ElevatedBorder).a;
+-                border_hover_opacity = theme::get_theme_color(theme::color::ElevatedBorderHard).a;
+-            }
+-        }
+-
+-        set_border_color(color, border_opacity);
+-        set_background_color(color, background_opacity);
+-        hover_style.set_border_color(color, border_hover_opacity);
+-        hover_style.set_background_color(color, background_hover_opacity);
+-        focus_style.set_border_color(color, border_hover_opacity);
+-        focus_style.set_background_color(color, background_hover_opacity);
+-        disabled_style.set_border_color(color, border_opacity / 4);
+-        disabled_style.set_background_color(color, background_opacity / 4);
+-        hover_disabled_style.set_border_color(color, border_hover_opacity / 4);
+-        hover_disabled_style.set_background_color(color, background_hover_opacity / 4);
+-
++    void Button::apply_theme_style(recompui::theme::color, bool) {
++        conker_look::button(this, hover_style, focus_style, disabled_style, hover_disabled_style);
+         add_style(&hover_style, hover_state);
+         add_style(&focus_style, focus_state);
+         add_style(&disabled_style, disabled_state);
 diff --git a/recompui/src/elements/ui_conker_look.h b/recompui/src/elements/ui_conker_look.h
 new file mode 100644
-index 0000000..64c0eed
+index 0000000..68f184d
 --- /dev/null
 +++ b/recompui/src/elements/ui_conker_look.h
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,69 @@
 +#ifndef RECOMPUI_CONKER_LOOK_H
 +#define RECOMPUI_CONKER_LOOK_H
 +
 +#include "ui_element.h"
 +
-+// Conker's own menu look for the settings: see-through pill rings (orange-red when chosen, dark steel
-+// otherwise), gold names, orange for what is chosen. Outlines and shadows: conker-* classes in recomp.rcss.
++// Conker's own menu look for the settings: pill rings (the chosen one filled orange with light letters, the
++// others a steel ring with soft cream letters), gold names, orange for the option you're on. Kept soft so
++// it's easy on the eyes. Outlines and shadows: conker-* classes in recomp.rcss.
 +namespace recompui::conker_look {
 +    constexpr const char *font = "Luckiest Guy";
-+    constexpr Color gold{ 0xF7, 0xC9, 0x48, 0xFF };
-+    constexpr Color orange{ 0xFF, 0x93, 0x2B, 0xFF };
-+    constexpr Color ring{ 0xEE, 0x4E, 0x14, 0xFF };
-+    constexpr Color steel{ 0x55, 0x5A, 0x62, 0xFF };
-+    constexpr Color brown{ 0x9C, 0x4A, 0x1C, 0xFF };
-+    constexpr Color brown_lit{ 0xC9, 0x6C, 0x2C, 0xFF };
++    constexpr Color gold{ 0xF0, 0xD4, 0x8A, 0xFF };       // option names
++    constexpr Color orange{ 0xFF, 0xB2, 0x5C, 0xFF };     // the option you're on
++    constexpr Color ring{ 0xF2, 0x8C, 0x3E, 0xFF };       // the chosen pill's ring
++    constexpr Color fill{ 0xC8, 0x56, 0x1A, 0xFF };       // the chosen pill, and the sliders
++    constexpr Color chosen_text{ 0xFF, 0xF4, 0xE2, 0xFF };
++    constexpr Color steel{ 0x6E, 0x74, 0x7C, 0xFF };      // the other pills' ring
++    constexpr Color brown{ 0xC8, 0xBC, 0xA8, 0xFF };      // the other pills' letters
++    constexpr Color brown_lit{ 0xEE, 0xE2, 0xCC, 0xFF };  // pointed at
 +    constexpr Color red{ 0xD8, 0x2A, 0x14, 0xFF };
 +    constexpr Color purple{ 0x6E, 0x3C, 0xB0, 0xFF };
 +    constexpr Color track{ 0x26, 0x28, 0x2C, 0xFF };
@@ -433,11 +588,30 @@ index 0000000..64c0eed
 +        element->set_border_width(3.0f);
 +        element->set_border_radius(size);
 +        element->set_border_color(steel);
++        element->set_background_color(Color{ 0, 0, 0, 0 }); // (so a chosen pill's fill goes when it's no longer chosen)
 +        element->set_color(brown);
 +        element->set_padding_top(size * 0.22f);
 +        element->set_padding_bottom(size * 0.08f);
 +        element->set_padding_left(size * 0.6f);
 +        element->set_padding_right(size * 0.6f);
++    }
++
++    // A button's look (Install Mods, Reset to Defaults, Apply, the X...): a steel ring with light letters, filled
++    // orange while pointed at or selected. The hover, focus and disabled styles are the button's own.
++    inline void button(Element *element, Style &hover, Style &focus, Style &disabled, Style &hover_disabled) {
++        element->set_border_color(steel);
++        element->set_background_color(Color{ 0, 0, 0, 0 });
++        element->set_color(brown_lit);
++        for (Style *style : { &hover, &focus }) {
++            style->set_border_color(ring);
++            style->set_background_color(fill);
++            style->set_color(chosen_text);
++        }
++        for (Style *style : { &disabled, &hover_disabled }) {
++            style->set_border_color(Color{ steel.r, steel.g, steel.b, 0x60 });
++            style->set_background_color(Color{ 0, 0, 0, 0 });
++            style->set_color(Color{ brown.r, brown.g, brown.b, 0x70 });
++        }
 +    }
 +}
 +
@@ -478,6 +652,58 @@ index 34eec3f..2adc6cc 100644
      // Used for backwards compatibility with legacy UI elements.
      Element(ResourceId rid, Rml::Element *base);
  
+diff --git a/recompui/src/elements/ui_icon_button.cpp b/recompui/src/elements/ui_icon_button.cpp
+index bbc9cc2..91e52d3 100644
+--- a/recompui/src/elements/ui_icon_button.cpp
++++ b/recompui/src/elements/ui_icon_button.cpp
+@@ -1,4 +1,5 @@
+ #include "ui_icon_button.h"
++#include "ui_conker_look.h"
+ #include "ui_pseudo_border.h"
+ 
+ #include <cassert>
+@@ -22,7 +23,7 @@ namespace recompui {
+         set_height(float_size_internal);
+         set_min_height(float_size_internal);
+         set_max_height(float_size_internal);
+-        set_border_width(theme::border::width);
++        set_border_width(3.0f);
+         set_border_radius(float_size_internal * 0.5f);
+         set_border_color(theme::color::Transparent);
+ 
+@@ -160,30 +161,8 @@ namespace recompui {
+         }
+     }
+ 
+-    void IconButton::apply_theme_style(recompui::theme::color color, bool is_basic) {
+-        uint8_t border_opacity = is_basic ? 0 : 204;
+-        uint8_t background_opacity = is_basic ? 0 : 13;
+-        uint8_t background_hover_opacity = 77;
+-        uint8_t border_hover_opacity = is_basic ? background_hover_opacity : 255;
+-
+-        if (color == theme::color::Elevated) {
+-            background_hover_opacity = theme::get_theme_color(theme::color::Elevated).a;
+-            if (is_basic) {
+-                border_hover_opacity = background_hover_opacity;
+-            } else {
+-                background_opacity = theme::get_theme_color(theme::color::ElevatedSoft).a;
+-                border_opacity = theme::get_theme_color(theme::color::ElevatedBorder).a;
+-                border_hover_opacity = theme::get_theme_color(theme::color::ElevatedBorderHard).a;
+-            }
+-        }
+-
+-        set_border_color(color, border_opacity);
+-        set_background_color(color, background_opacity);
+-        hover_style.set_border_color(color, border_hover_opacity);
+-        hover_style.set_background_color(color, background_hover_opacity);
+-        focus_style.set_border_color(color, border_hover_opacity);
+-        focus_style.set_background_color(color, background_hover_opacity);
+-
++    void IconButton::apply_theme_style(recompui::theme::color, bool) {
++        conker_look::button(this, hover_style, focus_style, disabled_style, hover_disabled_style);
+         add_style(&hover_style, hover_state);
+         add_style(&focus_style, focus_state);
+         add_style(&disabled_style, disabled_state);
 diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
 index b057f46..a17068c 100644
 --- a/recompui/src/elements/ui_modal.cpp
@@ -561,7 +787,7 @@ index d065a14..f9854b9 100644
      };
  
 diff --git a/recompui/src/elements/ui_radio.cpp b/recompui/src/elements/ui_radio.cpp
-index 7e5c18d..45eb751 100644
+index 7e5c18d..a42c3ba 100644
 --- a/recompui/src/elements/ui_radio.cpp
 +++ b/recompui/src/elements/ui_radio.cpp
 @@ -1,6 +1,7 @@
@@ -572,7 +798,7 @@ index 7e5c18d..45eb751 100644
  
  namespace recompui {
  
-@@ -13,19 +14,15 @@ namespace recompui {
+@@ -13,19 +14,16 @@ namespace recompui {
          set_text(name);
          set_cursor(Cursor::Pointer);
          set_typography(theme::Typography::LabelSM);
@@ -589,7 +815,8 @@ index 7e5c18d..45eb751 100644
 -        checked_style.set_color(theme::color::White);
 -        checked_style.set_border_color(theme::color::Text);
 +        hover_style.set_color(conker_look::brown_lit);
-+        checked_style.set_color(conker_look::orange);
++        checked_style.set_color(conker_look::chosen_text);
++        checked_style.set_background_color(conker_look::fill);
 +        checked_style.set_border_color(conker_look::ring);
          pulsing_style.set_border_color(theme::color::SecondaryA80);
 -        disabled_style.set_color(theme::color::TextInactive);
@@ -597,7 +824,7 @@ index 7e5c18d..45eb751 100644
          disabled_style.set_opacity(0.5f);
          disabled_style.set_cursor(Cursor::None);
  
-@@ -127,7 +124,9 @@ namespace recompui {
+@@ -127,7 +125,9 @@ namespace recompui {
      }
  
      Radio::Radio(ResourceId rid, Element *parent) : Container(rid, parent, FlexDirection::Row, JustifyContent::FlexStart, Events(EventType::Focus, EventType::Update, EventType::Enable)) {
@@ -609,7 +836,7 @@ index 7e5c18d..45eb751 100644
          // enable_focus();
          set_as_navigation_container(NavigationType::Horizontal);
 diff --git a/recompui/src/elements/ui_slider.cpp b/recompui/src/elements/ui_slider.cpp
-index 7a50da4..a37eb77 100644
+index 7a50da4..0fdb1a3 100644
 --- a/recompui/src/elements/ui_slider.cpp
 +++ b/recompui/src/elements/ui_slider.cpp
 @@ -1,6 +1,7 @@
@@ -677,7 +904,7 @@ index 7a50da4..a37eb77 100644
 +            fill_element->set_top(0.0f);
 +            fill_element->set_left(0.0f);
 +            fill_element->set_height(10.0f);
-+            fill_element->set_background_color(conker_look::ring);
++            fill_element->set_background_color(conker_look::fill);
 +            fill_element->set_border_radius(5.0f);
 +
              circle_element = context.create_element<Clickable>(bar_element, true);
@@ -714,7 +941,7 @@ index 4d8c41e..aa2e939 100644
          double min_value = 0.0;
          double max_value = 100.0;
 diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
-index 2c5dc52..dd6d3b6 100644
+index 2c5dc52..de09b5b 100644
 --- a/recompui/src/elements/ui_tab_set.cpp
 +++ b/recompui/src/elements/ui_tab_set.cpp
 @@ -1,5 +1,6 @@
@@ -724,7 +951,7 @@ index 2c5dc52..dd6d3b6 100644
  
  namespace recompui {
  
-@@ -11,21 +12,18 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
+@@ -11,21 +12,19 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
      set_visible(true);
      set_position(Position::Relative);
      set_margin(0);
@@ -745,13 +972,14 @@ index 2c5dc52..dd6d3b6 100644
 -    checked_style.set_color(theme::color::White);
 -    pulsing_style.set_color(theme::color::WhiteA80);
 +    hover_style.set_color(conker_look::brown_lit);
-+    checked_style.set_color(conker_look::orange);
++    checked_style.set_color(conker_look::chosen_text);
++    checked_style.set_background_color(conker_look::fill);
 +    checked_style.set_border_color(conker_look::ring);
 +    pulsing_style.set_color(conker_look::brown_lit);
  
      disabled_style.set_cursor(Cursor::None);
      disabled_style.set_color(theme::color::TextDim);
-@@ -33,9 +31,11 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
+@@ -33,9 +32,11 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
  
      ContextId context = get_current_context();
      label = context.create_element<Label>(this, std::string{text}, theme::Typography::Header3);
@@ -764,7 +992,7 @@ index 2c5dc52..dd6d3b6 100644
      indicator->set_position(Position::Absolute);
      indicator->set_height(2.0f);
      indicator->set_bottom(2.0f);
-@@ -116,8 +116,8 @@ TabSet::TabSet(ResourceId rid, Element *parent) :
+@@ -116,8 +117,8 @@ TabSet::TabSet(ResourceId rid, Element *parent) :
      set_display(Display::Flex);
      set_flex_direction(FlexDirection::Row);
      set_justify_content(JustifyContent::FlexStart);

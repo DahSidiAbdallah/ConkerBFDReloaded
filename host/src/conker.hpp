@@ -91,7 +91,7 @@ namespace conker {
         void adjust_cull_scales(uint8_t* rdram, uint64_t camera_address);
     }
     bool skip_intro();
-    uint32_t launcher_poster(); // Settings > Conker > Launcher Poster: 0..10 a poster, 11 Random
+    uint32_t launcher_poster(); // Settings > Conker > Launcher Poster: 0..8 a poster, 9 Random
     bool free_camera_enabled();
     bool free_camera_mouse(); // Free Camera: Right Stick and Mouse
 

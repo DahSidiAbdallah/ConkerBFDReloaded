@@ -1,10 +1,10 @@
-# Makes the launcher's button pictures in the game's own menu style (conker_ui.py, orange/red):
+# Makes the launcher's button pictures in the game's own menu style (conker_ui.py, the soft palette):
 # host/assets/menu/<name>_on.png (chosen) and <name>_off.png, at the poster's scale (2560x1440).
 #   .venv/bin/python tools/launcher_art/make_buttons.py
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 import conker_ui
-conker_ui.use('orange')
+conker_ui.use('soft')
 out = os.path.join(os.path.dirname(__file__), '..', '..', 'host', 'assets', 'menu')
 os.makedirs(out, exist_ok=True)
 labels = {

@@ -5,7 +5,7 @@
 from PIL import Image, ImageFilter, ImageEnhance
 A = '/home/dah/ConkerRecomp/host/assets/'
 folders = ['poster', 'poster_old', 'poster_king', 'poster_chainsaw', 'poster_dollar', 'poster_panther', 'poster_three',
-           'poster_birdy', 'poster_sunflower', 'poster_gregg', 'poster_berri']
+           'poster_gregg', 'poster_berri']
 for n, folder in enumerate(folders):
     lines = open(A + folder + '/layout.txt').read().split('\n')
     pw, ph = map(int, lines[0].split())

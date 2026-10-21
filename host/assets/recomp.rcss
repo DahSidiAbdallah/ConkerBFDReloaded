@@ -3,10 +3,10 @@
   around the letters, the page titles' gold rim. (No box-shadow: the renderer draws it in the wrong place.)
 */
 .conker-pill {
-    font-effect: outline(2dp #1a0700);
+    font-effect: outline(1.5dp #120c08);
 }
 .conker-name {
-    font-effect: outline(3dp #2b1300), shadow(2dp 3dp #000000);
+    font-effect: outline(2dp #1e1408), shadow(1dp 2dp #000000);
 }
 .conker-heading {
     font-effect: outline(3dp #f2c040), shadow(2dp 4dp #000000);
