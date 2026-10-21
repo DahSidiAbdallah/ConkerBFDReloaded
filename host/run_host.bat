@@ -28,6 +28,7 @@ if exist C:\ConkerRecompWin\test_camera_flags.txt set /p CONKER_TEST_CAMERA_FLAG
 if exist C:\ConkerRecompWin\test_sink.txt set /p CONKER_TEST_SINK=<C:\ConkerRecompWin\test_sink.txt
 if exist C:\ConkerRecompWin\test_device.txt set /p CONKER_TEST_DEVICE=<C:\ConkerRecompWin\test_device.txt
 if exist C:\ConkerRecompWin\test_poke.txt set /p CONKER_TEST_POKE=<C:\ConkerRecompWin\test_poke.txt
+if exist C:\ConkerRecompWin\speed_until.txt set /p CONKER_SPEED_UNTIL=<C:\ConkerRecompWin\speed_until.txt
 if exist C:\ConkerRecompWin\test_gun.txt set /p CONKER_TEST_GUN=<C:\ConkerRecompWin\test_gun.txt
 if exist C:\ConkerRecompWin\test_f9.txt set /p CONKER_TEST_F9=<C:\ConkerRecompWin\test_f9.txt
 if exist C:\ConkerRecompWin\vtxlight.flag set RT64_CBFD_VTXLIGHT_LOG=C:\ConkerRecompWin\snaps\vtxlight.txt

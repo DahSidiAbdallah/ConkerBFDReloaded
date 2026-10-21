@@ -28,6 +28,7 @@
 namespace {
     std::atomic<uint32_t> vis{0};
     uint32_t speed = 1;
+    double speed_until = -1.0;
     struct Snap { uint32_t vi; std::string name; };
     std::vector<Snap> snap_at;
     size_t next_snap = 0;
@@ -39,6 +40,10 @@ void conker::testing::init() {
         speed = (uint32_t)std::max(1, std::atoi(s));
         ultramodern::set_speed_multiplier(speed);
         std::printf("[testing] running %ux faster, sound muted\n", speed);
+        // CONKER_SPEED_UNTIL=seconds: back to real speed from then on (e.g. frame-rate tests further into the game).
+        if (const char* u = std::getenv("CONKER_SPEED_UNTIL")) {
+            speed_until = std::atof(u);
+        }
     }
     if (const char* s = std::getenv("CONKER_SNAP_AT")) {
         // Seconds, decimals allowed (e.g. 64.05), any other separator (the .bat gets them
@@ -73,6 +78,11 @@ extern "C" volatile int rt64_cbfd_log_window; // rt64_rsp.cpp (testing)
 
 void conker::testing::on_vi(uint8_t* rdram) {
     uint32_t now = ++vis;
+    if (speed > 1 && speed_until >= 0 && now / 60.0 >= speed_until) {
+        speed = 1;
+        ultramodern::set_speed_multiplier(1);
+        std::printf("[testing] real speed from %.1f s\n", now / 60.0);
+    }
     // CONKER_TEST_POKE=seconds:hexaddress:delta;...: adds delta to the byte at that address then (e.g. player 1's
     // lives, 0x800D2144; Conker's health, 0x800CC49A), to make the game show its HUD or reach a game over.
     struct Poke { double at; uint32_t addr; int delta; };

@@ -137,12 +137,13 @@ diff -ruN before/src/hle/rt64_rsp.cpp ours/src/hle/rt64_rsp.cpp
 diff -ruN before/src/hle/rt64_state.cpp ours/src/hle/rt64_state.cpp
 --- a/src/hle/rt64_state.cpp
 +++ b/src/hle/rt64_state.cpp
-@@ -1740,6 +1740,9 @@
+@@ -1740,6 +1740,10 @@
          }
  #   endif
  
-+        // Conker: whether this frame is drawn without frames between it and the next (setInterpolationPaused).
-+        workload.skipInterpolation = interpolationPaused();
++        // Conker: the framebuffer this frame keeps for the next (setHeldFramebuffer).
++        const uint32_t heldAddress = heldFramebuffer();
++        workload.heldFramebuffer = (heldAddress != 0) ? rdp->maskAddress(heldAddress) : 0;
 +
          // Store the presentation rate in the workload.
          if (extended.refreshRate != UINT16_MAX) {
@@ -158,14 +159,14 @@ diff -ruN before/src/hle/rt64_workload.cpp ours/src/hle/rt64_workload.cpp
 +
  namespace RT64 {
 +    // Conker: see rt64_workload.h.
-+    static std::atomic<bool> interpolationPausedFlag{ false };
++    static std::atomic<uint32_t> heldFramebufferAddress{ 0 };
 +
-+    void setInterpolationPaused(bool paused) {
-+        interpolationPausedFlag = paused;
++    void setHeldFramebuffer(uint32_t address) {
++        heldFramebufferAddress = address;
 +    }
 +
-+    bool interpolationPaused() {
-+        return interpolationPausedFlag;
++    uint32_t heldFramebuffer() {
++        return heldFramebufferAddress;
 +    }
 +
      // Common functions.
@@ -174,41 +175,189 @@ diff -ruN before/src/hle/rt64_workload.cpp ours/src/hle/rt64_workload.cpp
 diff -ruN before/src/hle/rt64_workload.h ours/src/hle/rt64_workload.h
 --- a/src/hle/rt64_workload.h
 +++ b/src/hle/rt64_workload.h
-@@ -24,6 +24,13 @@
+@@ -24,6 +24,15 @@
  #include "rt64_transform_group.h"
  
  namespace RT64 {
-+    // Conker: whether the frames the game makes from now on are drawn without frames between them, set by the
-+    // game's host each frame and stored in each workload as it's made (Workload::skipInterpolation). Conker's
-+    // motion blur (drunk) blends each frame with a copy of the last: with frames drawn between the game's, the
-+    // last frame is a fraction of a frame old, and the blur was all but gone (issue #77).
-+    void setInterpolationPaused(bool paused);
-+    bool interpolationPaused();
++    // Conker: the address of a framebuffer the game keeps from one of its frames to the next (0: none), set by
++    // the game's host each frame and stored in each workload as it's made (Workload::heldFramebuffer). Conker's
++    // motion blur (drunk) draws its copy of the last frame over the frame, then copies the frame into it. Frames
++    // drawn between the game's would each copy themselves into it too, leaving a copy a fraction of a frame old
++    // (the blur all but gone): they draw into a stand-in for it instead, which starts as the game's last frame
++    // left it, and only the game's own frame keeps its copy (WorkloadQueue::threadRenderFrame).
++    void setHeldFramebuffer(uint32_t address);
++    uint32_t heldFramebuffer();
 +
      struct DrawData {
          std::vector<float> posFloats;
          std::vector<float> velFloats;
-@@ -250,6 +257,8 @@
+@@ -250,6 +259,8 @@
          uint64_t workloadId = 0;
          uint64_t presentId = 0;
          bool paused = false;
-+        // Conker: drawn without frames between it and the next (setInterpolationPaused).
-+        bool skipInterpolation = false;
++        // Conker: the framebuffer kept from one game frame to the next (setHeldFramebuffer), 0 for none.
++        uint32_t heldFramebuffer = 0;
  
          struct {
              uint32_t testZIndexCount = 0;
 diff -ruN before/src/hle/rt64_workload_queue.cpp ours/src/hle/rt64_workload_queue.cpp
 --- a/src/hle/rt64_workload_queue.cpp
 +++ b/src/hle/rt64_workload_queue.cpp
-@@ -1051,7 +1051,7 @@
-                     matchingProfiler.log();
+@@ -295,7 +295,8 @@
+     void WorkloadQueue::threadRenderFrame(GameFrame &curFrame, const GameFrame &prevFrame, const WorkloadConfiguration &workloadConfig,
+         const DebuggerRenderer &debuggerRenderer, const DebuggerCamera &debuggerCamera, float curFrameWeight, float prevFrameWeight,
+         float deltaTimeMs, RenderTargetKey overrideTargetKey, int32_t overrideTargetFbPairIndex, RenderTarget *overrideTarget,
+-        uint32_t overrideTargetModifier, bool uploadVelocity, bool uploadExtras, bool interpolateTiles, bool interpolateLookAts)
++        uint32_t overrideTargetModifier, RenderTargetKey heldTargetKey, bool heldStandIn, bool uploadVelocity, bool uploadExtras,
++        bool interpolateTiles, bool interpolateLookAts)
+     {
+ #   if ENABLE_HIGH_RESOLUTION_RENDERER
+         std::scoped_lock<std::mutex> managerLock(ext.sharedResources->workloadMutex);
+@@ -372,6 +373,35 @@
+             targetManager.setOverride(overrideTargetKey, overrideTarget);
+         }
  
-                     const bool displayRateAboveOriginal = (workload.viOriginalRate > 0) && (workloadConfig.targetRate > workload.viOriginalRate);
--                    generateInterpolatedFrames = !workload.paused && displayRateAboveOriginal && !interpolationTargetKey.isEmpty();
-+                    generateInterpolatedFrames = !workload.paused && !workload.skipInterpolation && displayRateAboveOriginal && !interpolationTargetKey.isEmpty();
++        // Conker: a frame between the game's draws the held framebuffer (setHeldFramebuffer) into a stand-in,
++        // copied first from the framebuffer as the game's last frame left it: it draws that copy like the game's
++        // own frame does, and the framebuffer itself is left for the game's next frame.
++        constexpr uint32_t heldStandInModifier = 0x10000;
++        RenderTarget *heldSource = nullptr;
++        RenderTarget *heldTarget = nullptr;
++        if (heldStandIn) {
++            heldSource = &targetManager.get(heldTargetKey, true);
++            if (heldSource->isEmpty() || (heldSource->format != RenderTarget::colorBufferFormat(heldSource->usesHDR))) {
++                heldSource = nullptr;
++            }
++            else {
++                if ((heldStandInTarget == nullptr) || (heldStandInTarget->multisampling.sampleCount != heldSource->multisampling.sampleCount) || (heldStandInTarget->usesHDR != heldSource->usesHDR)) {
++                    if (heldStandInTarget != nullptr) {
++                        renderFramebufferManager->destroyAllWithRenderTarget(heldStandInTarget.get());
++                    }
++
++                    heldStandInTarget = std::make_unique<RenderTarget>(heldTargetKey.address, Framebuffer::Type::Color, heldSource->multisampling, heldSource->usesHDR);
++                }
++
++                heldTarget = heldStandInTarget.get();
++                if (heldTarget->resize(ext.workloadGraphicsWorker, heldSource->width, heldSource->height)) {
++                    renderFramebufferManager->destroyAllWithRenderTarget(heldTarget);
++                }
++
++                targetManager.setOverride(heldTargetKey, heldTarget);
++            }
++        }
++
+         for (uint32_t w = 0; w < curFrame.workloads.size(); w++) {
+             Workload &workload = workloads[curFrame.workloads[w]];
  
-                     const bool resetTicks = !generateInterpolatedFrames || (originalRateForTicks != workload.viOriginalRate) || (displayRateForTicks != workloadConfig.targetRate) || !displayRateAboveOriginal;
-                     if (resetTicks) {
+@@ -473,6 +503,9 @@
+                     if ((colorTarget != nullptr) && (colorTarget == overrideTarget)) {
+                         fbKey.modifierKey = overrideTargetModifier;
+                     }
++                    else if ((colorTarget != nullptr) && (colorTarget == heldTarget)) {
++                        fbKey.modifierKey = heldStandInModifier;
++                    }
+ 
+                     fixedResScale = RenderTarget::computeFixedResolutionScale(colorImg.width, fixedResScale);
+                     RenderTarget::computeScaledSize(nativeColorWidth, nativeColorHeight, fixedResScale, targetWidth, targetHeight, targetMisalignX);
+@@ -741,6 +774,30 @@
+             ext.workloadGraphicsWorker->commandList->begin();
+             ext.workloadGraphicsWorker->commandList->resetQueryPool(queryPool.get(), 0, 2);
+             ext.workloadGraphicsWorker->commandList->writeTimestamp(queryPool.get(), 0);
++
++            // Conker: the stand-in starts as the held framebuffer (see above), before anything draws with it.
++            if ((heldTarget != nullptr) && (heldSource != nullptr)) {
++                RenderTextureBarrier beforeCopyBarriers[] = {
++                    RenderTextureBarrier(heldSource->texture.get(), RenderTextureLayout::COPY_SOURCE),
++                    RenderTextureBarrier(heldTarget->texture.get(), RenderTextureLayout::COPY_DEST)
++                };
++
++                ext.workloadGraphicsWorker->commandList->barriers(RenderBarrierStage::COPY, beforeCopyBarriers, uint32_t(std::size(beforeCopyBarriers)));
++                ext.workloadGraphicsWorker->commandList->copyTexture(heldTarget->texture.get(), heldSource->texture.get());
++
++                RenderTextureBarrier afterCopyBarriers[] = {
++                    RenderTextureBarrier(heldSource->texture.get(), RenderTextureLayout::SHADER_READ),
++                    RenderTextureBarrier(heldTarget->texture.get(), RenderTextureLayout::SHADER_READ)
++                };
++
++                ext.workloadGraphicsWorker->commandList->barriers(RenderBarrierStage::GRAPHICS, afterCopyBarriers, uint32_t(std::size(afterCopyBarriers)));
++                heldTarget->resolutionScale = heldSource->resolutionScale;
++                heldTarget->downsampleMultiplier = heldSource->downsampleMultiplier;
++                heldTarget->misalignX = heldSource->misalignX;
++                heldTarget->invMisalignX = heldSource->invMisalignX;
++                heldTarget->markForResolve();
++                heldSource = nullptr;
++            }
+             framebufferRenderer->endFramebuffers(ext.workloadGraphicsWorker, &workload.drawBuffers, &workload.outputBuffers, workloadConfig.raytracingEnabled);
+             framebufferRenderer->recordSetup(ext.workloadGraphicsWorker, bufferUploaders, processRSP ? rspProcessor.get() : nullptr, processWorldVertices ? vertexProcessor.get() : nullptr, &workload.outputBuffers, workloadConfig.raytracingEnabled);
+             
+@@ -922,6 +979,10 @@
+             targetManager.removeOverride(overrideTargetKey);
+         }
+ 
++        if (heldTarget != nullptr) {
++            targetManager.removeOverride(heldTargetKey);
++        }
++
+         framebufferRenderer->advanceFrame(workloadConfig.raytracingEnabled);
+         rendererCPUProfiler.end();
+         rendererCPUProfiler.log();
+@@ -994,6 +1055,7 @@
+                 // Detect the color image to interpolate for this workload.
+                 RenderTargetKey interpolationTargetKey;
+                 int32_t interpolationTargetFbPairIndex = -1;
++                RenderTargetKey heldTargetKey; // Conker: setHeldFramebuffer
+                 {
+                     std::scoped_lock<std::mutex> managerLock(ext.sharedResources->managerMutex);
+                     FramebufferManager &fbManager = ext.sharedResources->framebufferManager;
+@@ -1020,6 +1082,13 @@
+                             colorSet.insert(colorImg.address);
+                         }
+ 
++                        if ((workload.heldFramebuffer != 0) && (colorImg.address == workload.heldFramebuffer) && heldTargetKey.isEmpty()) {
++                            heldTargetKey.fbType = Framebuffer::Type::Color;
++                            heldTargetKey.address = colorImg.address;
++                            heldTargetKey.siz = colorImg.siz;
++                            heldTargetKey.width = colorImg.width;
++                        }
++
+                         if (!interpolationCandidate || !interpolationTargetKey.isEmpty()) {
+                             continue;
+                         }
+@@ -1182,8 +1251,11 @@
+                     }
+ 
+                     int64_t renderTimeMicro = workloadTimer.elapsedMicroseconds();
++                    // Conker: only the last of the frames (the game's own) keeps the held framebuffer (setHeldFramebuffer).
++                    const bool heldStandIn = !heldTargetKey.isEmpty() && (heldTargetKey.hash() != interpolationTargetKey.hash()) && ((frame + 1) < displayFrames);
+                     threadRenderFrame(curFrame, prevFrame, workloadConfig, workload.debuggerRenderer, workload.debuggerCamera, curFrameWeight, prevFrameWeight, deltaTimeMs,
+-                        interpolationTargetKey, interpolationTargetFbPairIndex, overrideTarget, overrideModifier, velocityUploaderUsed, uploadExtras, tileInterpolationUsed, lookAtInterpolationUsed);
++                        interpolationTargetKey, interpolationTargetFbPairIndex, overrideTarget, overrideModifier, heldTargetKey, heldStandIn, velocityUploaderUsed, uploadExtras,
++                        tileInterpolationUsed, lookAtInterpolationUsed);
+ 
+                     // Add total time the frame took to render.
+                     renderTimeTotalMicro += workloadTimer.elapsedMicroseconds() - renderTimeMicro;
+diff -ruN before/src/hle/rt64_workload_queue.h ours/src/hle/rt64_workload_queue.h
+--- a/src/hle/rt64_workload_queue.h
++++ b/src/hle/rt64_workload_queue.h
+@@ -91,6 +91,8 @@
+         std::unique_ptr<RSPProcessor> rspProcessor;
+         std::unique_ptr<VertexProcessor> vertexProcessor;
+         std::unique_ptr<RenderTarget> dummyDepthTarget;
++        // Conker: the stand-in for the held framebuffer in frames between the game's (setHeldFramebuffer).
++        std::unique_ptr<RenderTarget> heldStandInTarget;
+         std::unique_ptr<RenderQueryPool> queryPool;
+         FramebufferChangePool scratchFbChangePool;
+         ProfilingTimer rendererCPUProfiler = ProfilingTimer(120);
+@@ -116,7 +118,8 @@
+         void threadRenderFrame(GameFrame &curFrame, const GameFrame &prevFrame, const WorkloadConfiguration &workloadConfig,
+             const DebuggerRenderer &debuggerRenderer, const DebuggerCamera &debuggerCamera, float curFrameWeight, float prevFrameWeight,
+             float deltaTimeMs, RenderTargetKey overrideTargetKey, int32_t overrideTargetFbPairIndex, RenderTarget *overrideTarget,
+-            uint32_t overrideTargetModifier, bool uploadVelocity, bool uploadExtras, bool interpolateTiles, bool interpolateLookAts);
++            uint32_t overrideTargetModifier, RenderTargetKey heldTargetKey, bool heldStandIn, bool uploadVelocity, bool uploadExtras,
++            bool interpolateTiles, bool interpolateLookAts);
+ 
+         void threadAdvanceBarrier();
+         void threadAdvanceWorkloadId(uint64_t newWorkloadId);
 diff -ruN before/src/render/rt64_framebuffer_renderer.cpp ours/src/render/rt64_framebuffer_renderer.cpp
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp

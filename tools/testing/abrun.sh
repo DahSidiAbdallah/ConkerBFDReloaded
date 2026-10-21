@@ -26,7 +26,7 @@ cp $CFG/saves/conker.n64.us.1.0.bin $CFG/saves/save.abtest # the player's save t
 # outside the barn, room 0x0C). SAVE=name picks another from C:\ConkerRecompWin\emulator_saves
 # (user_2026-09-30.eep: a copy of the player's own save, further on).
 cp $W/emulator_saves/${SAVE:-pj64_2026-08-22.eep} $CFG/saves/conker.n64.us.1.0.bin
-restore() { taskkill.exe /F /IM ConkerBFDReloaded.exe >/dev/null 2>&1; for f in graphics conker general accessibility; do cp -f $CFG/$f.json $out/settings_$f.json 2>/dev/null; done; touch $W/skip_intro.flag; mv -f $CFG/saves/save.abtest $CFG/saves/conker.n64.us.1.0.bin; for f in graphics sound conker mods general accessibility; do mv -f $CFG/$f.json.abtest $CFG/$f.json; done; rm -f $W/record.flag $W/music_seqps.txt $W/snap_room.txt $W/log_window.txt $W/test_warp.txt $W/test_place.txt $W/test_gun.txt; for f in ${FLAGS:-}; do rm -f $W/$f.flag; done; }
+restore() { taskkill.exe /F /IM ConkerBFDReloaded.exe >/dev/null 2>&1; for f in graphics conker general accessibility; do cp -f $CFG/$f.json $out/settings_$f.json 2>/dev/null; done; touch $W/skip_intro.flag; mv -f $CFG/saves/save.abtest $CFG/saves/conker.n64.us.1.0.bin; for f in graphics sound conker mods general accessibility; do mv -f $CFG/$f.json.abtest $CFG/$f.json; done; rm -f $W/speed_until.txt $W/record.flag $W/music_seqps.txt $W/snap_room.txt $W/log_window.txt $W/test_warp.txt $W/test_place.txt $W/test_gun.txt; for f in ${FLAGS:-}; do rm -f $W/$f.flag; done; }
 trap restore EXIT
 trap 'exit 130' INT TERM HUP
 python3 - "$CFG" "$changes" <<'PY'
