@@ -26,6 +26,13 @@
 // real drop (170 from the top down to the ground under him): stepping off a slope that steepens, the
 // search finds no edge either, and he used to hang against the slope with the ground just below.
 //
+// Opened up, the search takes edges the game never meant to be held, and the way it turns him to one
+// (its found angle) can be the wrong way round: running off, or coming down beside an edge, he hung
+// facing away from the wall, holding nothing, and pressing up to climb only took him further down.
+// So once the search found an edge in a fall it was opened for, he's turned around if he'd face away
+// from it: back the way he walked off, or toward the edge's point from where he is. The game's own
+// grab spots, outside such a fall, are left alone.
+//
 // One catch per fall: once he has hung, letting go or dropping doesn't catch again until he's back
 // on the ground (otherwise letting go took several presses).
 //
@@ -80,6 +87,7 @@ namespace {
         uint16_t facing = 0;        // his facing as he stepped off
         bool caught = false;        // he has hung since he was last on the ground
         bool nothing_to_hold = false; // the edge he walked off wasn't over a real drop (below)
+        bool opened = false;        // the search was opened up in this fall
     } fall;
 
     float real(uint8_t* rdram, int32_t address) {
@@ -175,6 +183,7 @@ extern "C" void conker_ledge_grab_mask(uint8_t* rdram, recomp_context* ctx) {
         fall.first_air_seen = false;
         fall.caught = false;
         fall.nothing_to_hold = false;
+        fall.opened = false;
         fall.facing = (uint16_t)MEM_HU(0, (gpr)(player + 0x76));
         return;
     }
@@ -191,6 +200,7 @@ extern "C" void conker_ledge_grab_mask(uint8_t* rdram, recomp_context* ctx) {
     if (flags == 0x00 && vertical_speed < 0.0f) {
         ctx->r8 = 0;
         opened_search = true;
+        fall.opened = true;
         return;
     }
     // Walked off: 0x11 as he steps off, 0x10 once the fall goes on (a moment in, which can be before
@@ -206,6 +216,7 @@ extern "C" void conker_ledge_grab_mask(uint8_t* rdram, recomp_context* ctx) {
     }
     ctx->r8 = 0; // every ground edge may be grabbed
     opened_search = true;
+    fall.opened = true;
     fall.walked_off = fall.grounded_seen;
     if (!fall.first_air_seen) {
         fall.first_air_seen = true;
@@ -221,6 +232,29 @@ extern "C" void conker_ledge_grab_mask(uint8_t* rdram, recomp_context* ctx) {
     }
 }
 
+namespace {
+    constexpr float pi = 3.14159265f;
+
+    // Turns the found angle around if the game would turn him to face away from (tx, tz), the way to
+    // the edge (above). A facing f looks along (cos f, -sin f); the game faces him the heading (+0x40)
+    // + the found angle + 90 degrees.
+    void face_the_edge(uint8_t* rdram, float tx, float tz, float shortest, bool debug) {
+        const float length = std::sqrt(tx * tx + tz * tz);
+        if (length < shortest) {
+            return; // too close to tell
+        }
+        const float angle = real(rdram, found_angle_b);
+        const float facing = (real(rdram, player + 0x40) + angle + 90.0f) * pi / 180.0f;
+        if ((std::cos(facing) * tx - std::sin(facing) * tz) / length > -0.5f) {
+            return; // facing it, or near enough
+        }
+        set_real(rdram, found_angle_b, angle >= 180.0f ? angle - 180.0f : angle + 180.0f);
+        if (debug) {
+            std::printf("[grab] turned around to face the edge (angle %.1f)\n", angle);
+        }
+    }
+}
+
 // func_1504CB98 at 0x15050ACC, about to read the grab search's results: walked off an object (a
 // crate, a box) the search can't see, the edge he crossed is handed over once his hands reach it.
 extern "C" void conker_ledge_grab_found(uint8_t* rdram, recomp_context* ctx) {
@@ -232,11 +266,23 @@ extern "C" void conker_ledge_grab_found(uint8_t* rdram, recomp_context* ctx) {
         std::printf("[grab] %.2fs check: edge %.1f / %.1f, y %.1f\n", conker::testing::game_seconds(),
             real(rdram, found_edge_a), real(rdram, found_edge_b), real(rdram, player + 0x18));
     }
-    if (!conker::qol::ledge_grab() || !fall.walked_off || fall.caught || !fall.first_air_seen || fall.nothing_to_hold) {
+    if (!conker::qol::ledge_grab() || fall.caught || !fall.opened) {
         return;
     }
-    if (real(rdram, found_edge_a) != none_found || real(rdram, found_edge_b) != none_found) {
+    if (real(rdram, found_edge_b) != none_found) {
+        // The search found an edge: the game's own hang, facing the edge (above).
+        if (fall.walked_off && fall.first_air_seen) {
+            face_the_edge(rdram, fall.last_ground[0] - fall.first_air[0], fall.last_ground[1] - fall.first_air[1], 0.5f, debug);
+        } else {
+            face_the_edge(rdram, real(rdram, found_x) - real(rdram, player + 0x14), real(rdram, found_z) - real(rdram, player + 0x1C), 4.0f, debug);
+        }
+        return;
+    }
+    if (real(rdram, found_edge_a) != none_found) {
         return; // the search found an edge: the game's own
+    }
+    if (!fall.walked_off || !fall.first_air_seen || fall.nothing_to_hold) {
+        return;
     }
     const float top = real(rdram, player + 0x1CC);
     if (real(rdram, player + 0x18) > top - hands_reach_below_top) {
@@ -271,6 +317,7 @@ extern "C" void conker_ledge_grab_found(uint8_t* rdram, recomp_context* ctx) {
     set_real(rdram, found_angle_b, angle);
     set_real(rdram, found_x, fall.last_ground[0] + dx * hang_from_last_ground);
     set_real(rdram, found_z, fall.last_ground[1] + dz * hang_from_last_ground);
+    face_the_edge(rdram, -dx, -dz, 0.5f, debug);
     if (debug) {
         std::printf("[grab] handed over the edge he walked off: top %.1f step %.1f facing %04X\n", top, step, facing);
     }
