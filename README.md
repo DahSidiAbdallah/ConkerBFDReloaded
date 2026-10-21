@@ -171,19 +171,18 @@ as `conker.n64.us.1.0.bin`, after backing up the one that's there.
 Start it once from a terminal with `./ConkerBFDReloaded --rom /path/to/conker.z64`. It's remembered after that.
 
 ## Known Issues
-* The free camera stays out of the game's fixed-camera spots (some doorways, the Windy barn), on purpose.
-* A low post or fence between the camera and Conker can still hide his body.
 * Ledge Grab catches straight edges, not the tip of a corner, and can sometimes catch an edge that isn't really a
   ledge, like the slanted side of a staircase.
 * Move While Shooting works with the shotgun only. While he walks and fires, his legs keep the shooting pose
   (the game has no walk-and-shoot animation).
 * The HD Icons (French) pack is missing about 40 pictures that only show up at certain moments of the story.
 * A few lines are still bleeped with the uncensored ROM: the bleeps are in the ROM hack itself.
-* In Bat's Tower, after the third cog, Conker's lips don't move and the cog's line can be silent.
-* In It's War, at the end of the beach, the Sergeant's line is silent when he saves Conker.
+* With the Uncensored ROM: in Bat's Tower, Conker's lips don't move while he talks to the cog, and the cog's line
+  after the third cog is silent; in It's War, the Sergeant's line is silent when Conker saves him at the end of the
+  beach. The hack's re-recorded voices leave out the game's lip-sync data, and in places the speech stops early.
+  The original ROM is fine.
 * Not tested everywhere yet: Linux on real hardware, frame rates above 60, rumble, gyro and multiplayer,
   Face Where the Camera Looks with the shotgun, and the German and Russian translations.
-* No macOS build yet.
 
 Found something else? Please [open an issue](../../issues) with what you were doing and a screenshot if you can.
 Ideas go on the [Discussions](../../discussions) board.
