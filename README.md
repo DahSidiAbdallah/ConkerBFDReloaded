@@ -101,6 +101,7 @@ while you hold, so you can't skip by accident. **Skip Intro** goes straight to t
 * Separate Music, Sound Effects and Speech volumes.
 * **Conker's Detail:** Conker stays on his most detailed model at any camera distance.
 * Pause when you alt-tab.
+* **Launcher Poster:** pick the launcher's picture from 11 designs (with a preview), or a random one each start.
 
 #### Accessibility
 Toggle instead of hold for R-Look and crouch, walk with L (hold or toggle), **Ledge Grab** (catch the edge when
@@ -217,7 +218,7 @@ Made by **dahmedvall95**, built on the work of:
   (CC BY 4.0), behind the HD Icons pack.
 * **Corrigo** and **Djipi** ([emulation64.fr](http://www.emulation64.fr/)) for the French translation, used with
   permission.
-* The [Conker Wiki](https://conker.fandom.com/) for some of the N64 screenshots in the launcher's collage.
+* The [Conker Wiki](https://conker.fandom.com/) for some of the N64 screenshots in the launcher's posters.
 * GLideN64 and Rice Video, whose texture fingerprints match texture packs.
 * Fonts: Inter, Noto Emoji, Luckiest Guy, Coming Soon, Poppins (SIL Open Font License) and PromptFont.
 
