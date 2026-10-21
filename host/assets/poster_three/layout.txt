@@ -2,4 +2,4 @@
 base.png 0 0 2560 1440 base
 full.png 0 0 2560 1440 full
 shade.png 1460 440 1100 1000 shade
-poster/logo.png 859 20 764 1080 logo
+poster/logo.png 61 61 820 1159 logo

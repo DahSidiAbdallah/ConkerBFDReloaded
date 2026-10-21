@@ -28,14 +28,15 @@ def darken(im, side, amount=0.75, width=0.55):   # a soft dark band on one side 
     t = np.clip((width - (x if side == 'left' else 1 - x)) / width, 0, 1) ** 1.5
     return Image.fromarray((a * (1 - amount * t)).astype(np.uint8))
 
-def triptych(names):   # three tall slices with slanted black cuts
-    out = Image.new('RGB', (W, H)); m = Image.new('L', (W, H))
+def triptych(names, cuts=(0, 660, 1280, W)):   # three tall slices with slanted black cuts
+    # (cuts starting right of 0: the band left of them is a blurred dark copy of the middle scene, for the logo)
     from PIL import ImageDraw
-    cuts = [0, 660, 1280, W]; slant = 90; gap = 14
+    out = ImageEnhance.Brightness(grade(frame(names[1][0])).resize((W, H)).filter(ImageFilter.GaussianBlur(30))).enhance(0.3)
+    slant = 90; gap = 14
     for i, (n, fx) in enumerate(names):
         im = place(grade(frame(n)), 1.0, fx, 0.5)
         x0, x1 = cuts[i], cuts[i + 1]
-        poly = [(x0 + (slant if i else 0) + gap, 0), (x1 + (slant if i < 2 else 0) - gap, 0),
+        poly = [(x0 + (slant if x0 else 0) + gap, 0), (x1 + (slant if i < 2 else 0) - gap, 0),
                 (x1 - gap, H), (x0 + gap, H)]
         mask = Image.new('L', (W, H)); ImageDraw.Draw(mask).polygon(poly, fill=255)
         shift = round((x0 + x1) / 2 - W / 2)
@@ -58,11 +59,11 @@ posters = {
     'poster_dollar':  (lambda: darken(place(grade(frame('hq_cash/t65.0')), 1.2, 0.46, 0.40), 'left'), 560, 640, 980),
     'poster_panther': (lambda: darken(place(grade(frame('hq_newgame/t384.0')), 1.1, 0.40, 0.45), 'left', 0.7), 560, 640, 980),
     'poster_berri':   (lambda: darken(place(grade(frame('hq_newgame/t191')), 1.1, 0.40, 0.45), 'right', 0.85, 0.55), 1930, 470, 760),
-    'poster_three':   (lambda: darken(triptych([('hq_newgame/t96.5', 0.5), ('hq_newgame/t316.0', 0.45), ('hq_newgame/t384.0', 0.45)]), 'left', 0.0), 1240, 560, 820),
+    'poster_three':   (lambda: darken(triptych([('hq_newgame/t96.5', 0.5), ('hq_newgame/t316.0', 0.45), ('hq_newgame/t384.0', 0.45)], (560, 1010, 1460, W)), 'left', 0.0), 470, 640, 880),
 }
 
-# Framed posters from small 4:3 N64 shots (conker.fandom.com: Birdy_cbf.png from y 128, below its speech bubble,
-# Sunflower.JPG, Gregg.jpeg: the N64 ones): the shot, tilted in a dark frame, over a blurred dark copy of itself.
+# Full-window posters from small 4:3 N64 shots (conker.fandom.com: Birdy_cbf.png from y 128, below its speech bubble,
+# Sunflower.JPG, Gregg.jpeg: the N64 ones): the shot as tall as the window on the right, fading into a blurred dark copy on the left.
 #   .venv/bin/python tools/launcher_art/hero_posters.py --framed SOURCES_DIR [preview.jpg]
 def framed(path, tilt, right=True):
     src = grade(Image.open(path).convert('RGB'))
@@ -84,12 +85,29 @@ def framed(path, tilt, right=True):
     out.alpha_composite(shadow, (x + 16, y + 22)); out.alpha_composite(card, (x, y))
     return out.convert('RGB')
 
+def fullbleed(path, fx=0.5, shift=0):   # shift: move the shot right by that much (its right edge is cut)
+    # The shot as big as the window's height, on the right; to its left it fades into a blurred dark copy
+    # of itself, where the logo goes.
+    src = grade(Image.open(path).convert('RGB'))
+    h = H; w = round(src.width * H / src.height)
+    if w < W * 0.72: w = round(W * 0.72); h = round(src.height * w / src.width)
+    pic = src.resize((w, h), Image.LANCZOS).filter(ImageFilter.UnsharpMask(3, 50, 2))
+    pic = pic.crop((0, (h - H) // 2, w, (h - H) // 2 + H)) if h > H else pic
+    bg = ImageEnhance.Brightness(src.resize((W, round(W * src.height / src.width))).filter(ImageFilter.GaussianBlur(30))).enhance(0.35)
+    bg = bg.crop((0, (bg.height - H) // 2, W, (bg.height - H) // 2 + H))
+    x = W - pic.width if pic.width < W else -round((pic.width - W) * fx)
+    x += shift
+    a = np.clip(np.linspace(0, 1, pic.width) * pic.width / 320, 0, 1) if x > 0 else np.ones(pic.width)
+    mask = Image.fromarray((np.tile(a, (pic.height, 1)) * 255).astype(np.uint8))
+    bg.paste(pic, (x, 0), mask)
+    return bg
+
 if len(sys.argv) > 1 and sys.argv[1] == '--framed':
     D = sys.argv[2].rstrip('/') + '/'
     posters = {
-        'poster_birdy':     (lambda: framed(D + 'birdy.png', 3), 470, 640, 900),
-        'poster_sunflower': (lambda: framed(D + 'sunflower.png', -3), 470, 640, 900),
-        'poster_gregg':     (lambda: framed(D + 'gregg.png', 3), 470, 640, 900),
+        'poster_birdy':     (lambda: darken(fullbleed(D + 'birdy.png', 0.0, 330), 'left', 0.75, 0.4), 470, 640, 900),
+        'poster_sunflower': (lambda: darken(fullbleed(D + 'sunflower.png'), 'left', 0.75, 0.4), 470, 640, 900),
+        'poster_gregg':     (lambda: darken(fullbleed(D + 'gregg.png'), 'left', 0.75, 0.4), 470, 640, 900),
     }
     sys.argv = sys.argv[2:]
 
