@@ -41,6 +41,7 @@ namespace {
     std::atomic<bool> toggle_r_on{ false }, toggle_z_on{ false }, reduce_motion_on{ false }, always_hud_on{ false }, longer_spin_on{ false };
     std::atomic<int> cash_counter_mode{ 0 };
     std::atomic<bool> ledge_grab_on{ false };
+    std::atomic<bool> photo_mode_on{ true };
     std::atomic<bool> invert_swimming_on{ false };
     std::atomic<int> longer_breath_mode{ 0 };
     std::atomic<bool> air_meter_on{ false };
@@ -357,6 +358,21 @@ namespace {
             "<recomp-color primary>Hold L</recomp-color> to skip any cutscene, even the first time you see it and the ones the original never "
             "lets you skip, like the opening. \"Hold to Skip\" shows in the corner with a ring that fills while you "
             "hold, so a quick press never skips by accident.", false, &skip_cutscene_on);
+        add_bool("photo_mode", "Photo Mode",
+            "<recomp-color primary>Experimental.</recomp-color> Press <recomp-color primary>P</recomp-color> (or hold <recomp-color primary>L</recomp-color> and press "
+            "<recomp-color primary>D-pad Down</recomp-color>) while playing to freeze the game and take pictures. The HUD hides and "
+            "the camera is yours:"
+            "<br /><recomp-color primary>Right stick / mouse</recomp-color>: turn around the scene."
+            "<br /><recomp-color primary>Left stick</recomp-color>: move (hold <recomp-color primary>L</recomp-color>: up and down)."
+            "<br /><recomp-color primary>Z / R / scroll wheel</recomp-color>: closer and further."
+            "<br /><recomp-color primary>D-pad</recomp-color>: the panel. Show or hide Conker, pick his pose (his idle animations), "
+            "give him a hat or something to hold (from the game's own), play or pause the pose and step a frame at a time, and "
+            "set the lens, tilt, filter and vignette."
+            "<br /><recomp-color primary>A</recomp-color>: save a picture (in the Photos folder, next to your settings)."
+            "<br />The hints at the bottom of the screen show your own buttons or keys."
+            "<br /><recomp-color primary>Start</recomp-color>: hide the panel. <recomp-color primary>B</recomp-color> or "
+            "<recomp-color primary>P</recomp-color>: back to the game.",
+            true, &photo_mode_on);
         add_bool("saving_icon", "Autosave Icon",
             "Shows Conker's head in the <recomp-color primary>bottom-right corner</recomp-color> while the game saves (at checkpoints and on the "
             "save menu), so you know your progress is safe. The original game shows none.", true, &saving_icon_on);
@@ -637,6 +653,7 @@ bool conker::qol::reduce_motion() { return reduce_motion_on; }
 bool conker::qol::always_show_hud() { return always_hud_on; }
 int conker::qol::cash_counter() { return cash_counter_mode; }
 bool conker::qol::ledge_grab() { return ledge_grab_on; }
+bool conker::photo::enabled() { return photo_mode_on; }
 bool conker::qol::invert_swimming() { return invert_swimming_on; }
 int conker::qol::longer_breath() { return longer_breath_mode; }
 bool conker::qol::air_meter() { return air_meter_on; }

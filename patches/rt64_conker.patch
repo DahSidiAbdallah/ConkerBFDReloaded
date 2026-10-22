@@ -46,10 +46,10 @@ index dccaa87..0ea98c1 100644
          }
  
 diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
-index 7de5b69..62ac019 100644
+index 7de5b69..93a1d1b 100644
 --- a/src/hle/rt64_present_queue.cpp
 +++ b/src/hle/rt64_present_queue.cpp
-@@ -4,12 +4,26 @@
+@@ -4,12 +4,35 @@
  
  #include "rt64_present_queue.h"
  
@@ -64,6 +64,15 @@ index 7de5b69..62ac019 100644
  
 +#include <atomic>
 +
++// Conker BFD: Reloaded (Photo Mode, host/src/photo_mode.cpp): set to 1 to have the next frame shown copied
++// back from the GPU as the game drew it (full size, without the menus drawn over it); the copy is handed to
++// rt64_conker_capture_done on the present thread (rows of rowPitch bytes; 8 bytes a pixel when hdr is set,
++// RGBA16, otherwise RGBA8), which keeps what it needs before returning.
++extern "C" {
++    volatile int rt64_conker_capture_request = 0;
++    void (*volatile rt64_conker_capture_done)(const uint8_t *data, uint32_t width, uint32_t height, uint32_t rowPitch, int hdr) = nullptr;
++}
++
  namespace RT64 {
 +    // Conker (from CBFD-Recompiled V0.1.5): frames presented to the screen so far, for the Show FPS
 +    // counter (host/src/fps_counter.cpp).
@@ -76,7 +85,47 @@ index 7de5b69..62ac019 100644
      // PresentQueue
  
      PresentQueue::PresentQueue() {
-@@ -402,7 +416,19 @@ namespace RT64 {
+@@ -341,6 +364,24 @@ namespace RT64 {
+                     }
+                 }
+                 
++                // Conker (Photo Mode): copy this frame back, as asked.
++                std::unique_ptr<RenderBuffer> captureBuffer;
++                uint32_t captureWidth = 0, captureHeight = 0, captureRowPitch = 0;
++                int captureHdr = 0;
++                if ((renderParams.texture != nullptr) && (rt64_conker_capture_request != 0) && (rt64_conker_capture_done != nullptr)) {
++                    rt64_conker_capture_request = 0;
++                    const uint32_t formatSize = RenderFormatSize(renderParams.textureFormat);
++                    captureWidth = renderParams.textureWidth;
++                    captureHeight = renderParams.textureHeight;
++                    captureRowPitch = ((captureWidth * formatSize + 255) / 256) * 256;
++                    captureHdr = (formatSize == 8) ? 1 : 0;
++                    captureBuffer = ext.device->createBuffer(RenderBufferDesc::ReadbackBuffer(uint64_t(captureRowPitch) * captureHeight));
++                    commandList->barriers(RenderBarrierStage::COPY, RenderTextureBarrier(renderParams.texture, RenderTextureLayout::COPY_SOURCE));
++                    commandList->copyTextureRegion(
++                        RenderTextureCopyLocation::PlacedFootprint(captureBuffer.get(), renderParams.textureFormat, captureWidth, captureHeight, 1, captureRowPitch / formatSize),
++                        RenderTextureCopyLocation::Subresource(renderParams.texture));
++                }
++
+                 commandList->setFramebuffer(swapChainFramebuffer);
+                 commandList->clearColor();
+ 
+@@ -368,6 +409,14 @@ namespace RT64 {
+                     ext.presentGraphicsWorker->commandQueue->executeCommandLists(&commandList, 1, &waitSemaphore, 1, &signalSemaphore, 1, ext.presentGraphicsWorker->commandFence.get());
+                     ext.presentGraphicsWorker->wait();
+                 }
++
++                if (captureBuffer != nullptr) {
++                    void *captureData = captureBuffer->map();
++                    if (captureData != nullptr) {
++                        rt64_conker_capture_done(reinterpret_cast<const uint8_t *>(captureData), captureWidth, captureHeight, captureRowPitch, captureHdr);
++                        captureBuffer->unmap();
++                    }
++                }
+             }
+ 
+             if (lockedWorkloadMutex) {
+@@ -402,7 +451,19 @@ namespace RT64 {
                  RenderCommandSemaphore *waitSemaphore = drawSemaphores[swapChainIndex].get();
                  presentTimestamp = Timer::current();
                  swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
@@ -1335,6 +1384,123 @@ index 4548f15..4629a38 100644
 +        uint neighbourRight;
 +        uint neighbourDown;
 +        uint neighbourPad;
+     };
+ #ifdef HLSL_CPU
+ };
+diff --git a/src/render/rt64_vi_renderer.cpp b/src/render/rt64_vi_renderer.cpp
+index b4ff4e9..3dd81f5 100644
+--- a/src/render/rt64_vi_renderer.cpp
++++ b/src/render/rt64_vi_renderer.cpp
+@@ -7,6 +7,14 @@
+ #include "shared/rt64_hlsl.h"
+ #include "shared/rt64_video_interface.h"
+ 
++// Conker BFD: Reloaded (Photo Mode, host/src/photo_mode.cpp): the filter and vignette over the picture (0 none),
++// and the picture's tilt.
++extern "C" {
++    volatile int rt64_conker_filter = 0;
++    volatile int rt64_conker_vignette = 0;
++    volatile int rt64_conker_tilt = 0; // degrees
++}
++
+ namespace RT64 {
+     // VIRenderer
+ 
+@@ -77,6 +85,9 @@ namespace RT64 {
+         pushConstants.videoResolution = computeHDSize(hlslpp::float2(p.vi->fbSize()), p.resolutionScale, p.downsamplingScale);
+         pushConstants.textureResolution = { float(p.textureWidth), float(p.textureHeight) };
+         pushConstants.gamma = p.vi->gamma();
++        pushConstants.conkerFilter = float(rt64_conker_filter);
++        pushConstants.conkerVignette = float(rt64_conker_vignette);
++        pushConstants.conkerTilt = float(rt64_conker_tilt) * 3.14159265358979f / 180.0f;
+ 
+         p.commandList->setPipeline(shader->pipeline.get());
+         p.commandList->setGraphicsPipelineLayout(shader->pipelineLayout.get());
+diff --git a/src/shaders/VideoInterfacePS.hlsl b/src/shaders/VideoInterfacePS.hlsl
+index 3f33475..6002aeb 100644
+--- a/src/shaders/VideoInterfacePS.hlsl
++++ b/src/shaders/VideoInterfacePS.hlsl
+@@ -32,10 +32,65 @@ float4 PixelAntialiasing(float2 uv) {
+     return SampleInput(uvTexspace / gConstants.textureResolution);
+ }
+ 
++// Conker BFD: Reloaded (Photo Mode, host/src/photo_mode.cpp, which does the same for its pictures): a filter
++// and a vignette over the picture. uv is 0-1 across it.
++float4 ConkerFilter(float4 color, float2 uv) {
++    const int filter = int(gConstants.conkerFilter + 0.5f);
++    float3 c = color.rgb;
++    const float l = dot(c, float3(0.299f, 0.587f, 0.114f));
++    if (filter == 1) {
++        c = float3(l, l, l);
++    }
++    else if (filter == 2) {
++        c = float3(dot(c, float3(0.393f, 0.769f, 0.189f)), dot(c, float3(0.349f, 0.686f, 0.168f)), dot(c, float3(0.272f, 0.534f, 0.131f)));
++    }
++    else if (filter == 3) {
++        c *= float3(1.10f, 1.02f, 0.86f);
++    }
++    else if (filter == 4) {
++        c *= float3(0.88f, 0.98f, 1.14f);
++    }
++    else if (filter == 5) {
++        c = ((l + (c - l) * 1.45f) - 0.5f) * 1.08f + 0.5f;
++    }
++    else if (filter == 6) {
++        c = (l + (c - l) * 0.65f) * 0.85f + 0.10f;
++    }
++    else if (filter == 7) {
++        const float n = (l - 0.5f) * 1.5f + 0.5f;
++        c = float3(n, n, n);
++    }
++
++    if ((gConstants.conkerVignette > 0.5f) || (filter == 7)) {
++        const float d = length(uv - 0.5f) * 1.2f;
++        c *= 1.0f - 0.55f * smoothstep(0.35f, 0.85f, d);
++    }
++
++    return float4(saturate(c), color.a);
++}
++
++// Conker BFD: Reloaded (Photo Mode): where a point of the tilted picture comes from, turned about the middle and
++// enlarged just enough to leave no corners.
++float2 ConkerTiltSource(float2 uv) {
++    const float aspect = gConstants.videoResolution.x / gConstants.videoResolution.y;
++    const float c = cos(gConstants.conkerTilt);
++    const float s = sin(gConstants.conkerTilt);
++    const float fill = c + max(aspect, 1.0f / aspect) * abs(s);
++    const float2 p = float2((uv.x - 0.5f) * aspect, uv.y - 0.5f);
++    const float2 q = float2(c * p.x - s * p.y, s * p.x + c * p.y) / fill;
++    return float2(q.x / aspect + 0.5f, q.y + 0.5f);
++}
++
+ float4 PSMain(in float4 pos : SV_Position, in float2 uv : TEXCOORD0) : SV_TARGET {
++    const float2 sourceUV = (gConstants.conkerTilt != 0.0f) ? ConkerTiltSource(uv) : uv;
+ #ifdef PIXEL_ANTIALIASING
+-    return PixelAntialiasing(uv);
++    float4 color = PixelAntialiasing(sourceUV);
+ #else
+-    return SampleInput((uv / gConstants.textureResolution) * gConstants.videoResolution);
++    float4 color = SampleInput((sourceUV / gConstants.textureResolution) * gConstants.videoResolution);
+ #endif
++    if ((gConstants.conkerFilter > 0.5f) || (gConstants.conkerVignette > 0.5f)) {
++        color = ConkerFilter(color, uv);
++    }
++
++    return color;
+ }
+\ No newline at end of file
+diff --git a/src/shared/rt64_video_interface.h b/src/shared/rt64_video_interface.h
+index b51cf09..8b98e77 100644
+--- a/src/shared/rt64_video_interface.h
++++ b/src/shared/rt64_video_interface.h
+@@ -13,6 +13,10 @@ namespace interop {
+         float2 videoResolution;
+         float2 textureResolution;
+         float gamma;
++        // Conker BFD: Reloaded (Photo Mode): a filter over the picture (0 none) and a vignette (0 none).
++        float conkerFilter;
++        float conkerVignette;
++        float conkerTilt; // the picture turned by this many radians (and enlarged to fill the screen)
      };
  #ifdef HLSL_CPU
  };

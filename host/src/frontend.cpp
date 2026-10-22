@@ -483,6 +483,7 @@ namespace {
         conker::pad_mappings::fix_all();
         NFD_Init(); // file dialogs (Load ROM, mods)
         conker_mouse_camera_init(); // the Free Camera's scroll wheel zoom (free_camera.cpp)
+        conker::photo::init(); // Photo Mode's P key and picture (photo_mode.cpp)
         conker::key_prompts_init(); // Button Prompts: which device is in use (key_prompts.cpp)
         conker::qol::init(); // Pause When Unfocused watches the window's focus
         return nullptr;
@@ -517,6 +518,7 @@ namespace {
         conker::pad_mappings::update();
         refresh_connected_controllers();
         conker::fps_counter::update();
+        conker::photo::update_ui();
         conker::crosshair::update();
         conker::qol::update();
     }
@@ -623,6 +625,7 @@ namespace {
         add_settings_backdrop();
         // recompui's UI exists now: the FPS counter can make its own.
         conker::fps_counter::on_ui_ready();
+        conker::photo::on_ui_ready();
         conker::crosshair::on_ui_ready();
         conker::qol::on_ui_ready();
 
@@ -740,6 +743,9 @@ namespace {
             constexpr uint16_t c_right = 0x0001, c_left = 0x0002, c_down = 0x0004, c_up = 0x0008;
             if (cx != 0.0f) *buttons &= (uint16_t)~(c_left | c_right);
             if (cy != 0.0f) *buttons &= (uint16_t)~(c_up | c_down);
+        }
+        if (controller == 0) {
+            conker::photo::filter_input(buttons, x, y);
         }
         if (controller == 0 && conker::skip_intro_pressing_start()) {
             *buttons |= 0x1000; // Start

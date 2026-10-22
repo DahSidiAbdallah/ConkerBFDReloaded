@@ -595,6 +595,10 @@ void conker::key_prompts_init() {
     SDL_AddEventWatch(watch_input, nullptr);
 }
 
+bool conker::keyboard_prompts_in_use() {
+    return keyboard_prompts();
+}
+
 // About once a second from the UI thread (qol.cpp's update): the pictures follow the bindings; when
 // they're made or change, the texture packs are loaded again with them.
 void conker::key_prompts_update() {

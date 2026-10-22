@@ -24,6 +24,7 @@ mouse, keyboard and controller support. A **Classic** mode keeps it as close to 
   * [Mouse, Keyboard and Gyro](#mouse-keyboard-and-gyro)
   * [Aiming Crosshair](#aiming-crosshair)
   * [Hold to Skip Cutscenes](#hold-to-skip-cutscenes)
+  * [Photo Mode (experimental)](#photo-mode-experimental)
   * [Quality of Life](#quality-of-life)
   * [Accessibility](#accessibility)
   * [Accurate Graphics](#accurate-graphics)
@@ -94,6 +95,13 @@ none for thrown things, which fly in an arc. The sniper scope keeps its own cros
 #### Hold to Skip Cutscenes
 Hold L to skip any cutscene, even the first time and the ones the original never lets you skip. A ring fills
 while you hold, so you can't skip by accident. **Skip Intro** goes straight to the bar menu.
+
+#### Photo Mode (experimental)
+Press **P** (or hold **L** and press **D-pad Down**) while playing: the game freezes, the HUD hides and the camera
+is yours. Pose Conker (his idle fidgets or the drunk sway), give him a hat or something to hold from the game's own
+(army helmet, gas mask, mohawks, the wolf hat, shotgun, bazooka…), hide him, and set the lens, tilt, a filter and a
+vignette. Pictures are saved full size in the Photos folder next to your settings. The hints show your own buttons
+or keys. On or off on the Conker tab.
 
 #### Quality of Life
 * An autosave icon in the corner while the game saves.
@@ -182,6 +190,8 @@ Start it once from a terminal with `./ConkerBFDReloaded --rom /path/to/conker.z6
   after the third cog is silent; in It's War, the Sergeant's line is silent when Conker saves him at the end of the
   beach. The hack's re-recorded voices leave out the game's lip-sync data, and in places the speech stops early.
   The original ROM is fine.
+* Photo Mode is experimental: frozen in the middle of his yo-yo trick, Conker can show a long orange line behind
+  him (the yo-yo's string), and some hats or items can sit oddly in some poses.
 * Not tested everywhere yet: Linux on real hardware, frame rates above 60, rumble, gyro and multiplayer,
   Face Where the Camera Looks with the shotgun, and the German and Russian translations.
 

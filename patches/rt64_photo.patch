@@ -1,0 +1,23 @@
+diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
+--- a/src/hle/rt64_workload_queue.cpp
++++ b/src/hle/rt64_workload_queue.cpp
+@@ -12,6 +12,10 @@
+ #include "rt64_present_queue.h"
+ 
+ #define ENABLE_HIGH_RESOLUTION_RENDERER 1
++
++// Conker: while the game's Photo Mode holds the world still, no in-between frames (host photo_mode.cpp sets it):
++// frozen objects can be paired up wrongly between frames and drawn halfway, doubled.
++extern "C" volatile int rt64_conker_no_interpolation = 0;
+ 
+ namespace RT64 {
+     // WorkloadQueue
+@@ -1120,7 +1124,7 @@
+                     matchingProfiler.log();
+ 
+                     const bool displayRateAboveOriginal = (workload.viOriginalRate > 0) && (workloadConfig.targetRate > workload.viOriginalRate);
+-                    generateInterpolatedFrames = !workload.paused && displayRateAboveOriginal && !interpolationTargetKey.isEmpty();
++                    generateInterpolatedFrames = !workload.paused && !rt64_conker_no_interpolation && displayRateAboveOriginal && !interpolationTargetKey.isEmpty();
+ 
+                     const bool resetTicks = !generateInterpolatedFrames || (originalRateForTicks != workload.viOriginalRate) || (displayRateForTicks != workloadConfig.targetRate) || !displayRateAboveOriginal;
+                     if (resetTicks) {

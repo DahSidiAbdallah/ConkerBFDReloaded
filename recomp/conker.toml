@@ -906,3 +906,48 @@ func = "func_1512C490"
 before_vram = 0x1512C844
 text = "{ extern void conker_mouse_camera_view(uint8_t*, recomp_context*); conker_mouse_camera_view(rdram, ctx); }"
 
+
+# Photo Mode (host/src/photo_mode.cpp): the game's update (func_15019130) is skipped while it's open, so the
+# world stands still while the frame is still drawn (it returns 1, as the update does); the HUD (func_1508FD38)
+# is skipped too, returning the display list ($a0) as it was.
+[[patches.hook]]
+func = "func_15019130"
+before_vram = 0x15019130
+text = "{ extern int conker_photo_frame(uint8_t*, recomp_context*); if (conker_photo_frame(rdram, ctx)) return; }"
+
+[[patches.hook]]
+func = "func_1508FD38"
+before_vram = 0x1508FD38
+text = "{ extern int conker_photo_hide_hud(uint8_t*, recomp_context*); if (conker_photo_hide_hud(rdram, ctx)) return; }"
+
+# Photo Mode's Conker: Hidden (host/src/photo_mode.cpp): the start of an object's drawing, with what it holds
+# ($a0 the display list, $a1 the object's index) is skipped for Conker and what hangs off him, returning the list
+# as it was.
+[[patches.hook]]
+func = "func_1502C974"
+before_vram = 0x1502C974
+text = "{ extern int conker_photo_hide_object(uint8_t*, recomp_context*); if (conker_photo_hide_object(rdram, ctx)) return; }"
+
+# Photo Mode's lens (host/src/photo_mode.cpp): player 1's call of the field of view step is kept, to be made again
+# while the camera's update (which makes it) is frozen.
+[[patches.hook]]
+func = "func_1510B128"
+before_vram = 0x1510B128
+text = "{ extern void conker_photo_fov_args(uint8_t*, recomp_context*); conker_photo_fov_args(rdram, ctx); }"
+
+# Testing (CONKER_TRACE_ANIM): logs who sets Conker's animation (photo_mode.cpp).
+[[patches.hook]]
+func = "func_1505E650"
+before_vram = 0x1505E650
+text = "{ extern void conker_trace_set_anim(uint8_t*, recomp_context*); conker_trace_set_anim(rdram, ctx); }"
+
+# Testing (CONKER_TRACE_ANIM): logs the attachment functions' arguments (photo_mode.cpp).
+[[patches.hook]]
+func = "func_15083568"
+before_vram = 0x15083568
+text = "{ extern void conker_trace_attach(uint8_t*, recomp_context*, int); conker_trace_attach(rdram, ctx, 1); }"
+
+[[patches.hook]]
+func = "func_150836CC"
+before_vram = 0x150836CC
+text = "{ extern void conker_trace_attach(uint8_t*, recomp_context*, int); conker_trace_attach(rdram, ctx, 2); }"

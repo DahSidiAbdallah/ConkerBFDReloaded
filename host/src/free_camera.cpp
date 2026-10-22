@@ -887,6 +887,9 @@ void conker::free_camera_write_history(const std::filesystem::path& path) {
 }
 
 extern "C" void conker_mouse_camera_view(uint8_t* rdram, recomp_context* ctx) {
+    if (conker::photo::view(rdram, ctx)) {
+        return;
+    }
     const gpr camera = ctx->r16;
     if ((uint32_t)camera == (uint32_t)MEM_W(0, (gpr)(int32_t)current_camera)) {
         float placed = 0.0f, collided = 0.0f;

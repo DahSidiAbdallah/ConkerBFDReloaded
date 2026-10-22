@@ -83,7 +83,11 @@ extern "C" void conker_field_of_view(uint8_t* rdram, recomp_context* ctx) {
     const float base_y = read_float(rdram, camera, 0x70);
     const float setting = setting_degrees();
     float target = 1.0f;
-    if (conker::normal_camera() && setting > 0.0f && base_y > 0.0f && base_y < 180.0f) {
+    const float photo_lens = (float)conker::photo::lens_degrees(); // Photo Mode's lens, over any other
+    if (photo_lens > 0.0f && base_y > 0.0f && base_y < 180.0f) {
+        target = half_tan(photo_lens) / half_tan(base_y);
+    }
+    else if (conker::normal_camera() && setting > 0.0f && base_y > 0.0f && base_y < 180.0f) {
         target = half_tan(setting) / half_tan(base_y);
     }
     widening += (target - widening) * ease;

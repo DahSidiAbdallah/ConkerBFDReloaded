@@ -101,6 +101,7 @@ namespace conker {
     void key_prompts_init();   // once SDL is up
     void key_prompts_update(); // now and then, from the UI thread
     void key_prompts_write_pictures(const std::filesystem::path& dir); // testing
+    bool keyboard_prompts_in_use(); // the prompts show keys and mouse buttons now (else the controller's)
     // free_camera.cpp: the right stick for the Free Camera (x right, y up, past the dead zone).
     void free_camera_stick(float* x, float* y);
     // free_camera.cpp: testing (F9 with capture_enabled): the free camera's last frames, as text.
@@ -122,6 +123,20 @@ namespace conker {
         void on_device_added();
         // Main thread (update_gfx), each frame: fixes the controllers connected since the last one.
         void update();
+    }
+
+    // photo_mode.cpp: Photo Mode (Conker tab).
+    namespace photo {
+        bool enabled(); // settings.cpp: the setting
+        bool active();
+        void init(); // frontend.cpp, once SDL is up
+        // frontend.cpp's get_input, player 1: keeps the buttons for the camera; the game gets none while it's open.
+        void filter_input(uint16_t* buttons, float* x, float* y);
+        // free_camera.cpp (conker_mouse_camera_view): true when the view's eye and look-at point are Photo Mode's.
+        bool view(uint8_t* rdram, recomp_context* ctx);
+        int lens_degrees(); // field_of_view.cpp: Photo Mode's lens (vertical degrees), 0 the game's
+        void on_ui_ready(); // frontend.cpp, as fps_counter's
+        void update_ui();   // main thread (update_gfx): the hint along the bottom
     }
 
     // crosshair.cpp: Aiming Crosshair (Conker tab).

@@ -14,8 +14,12 @@ rem Ours: fast-forward (Skip Intro, test runs) and leaving frames undrawn.
 call :patch "%D%\N64ModernRuntime" "%P%\n64modernruntime_conker.patch" || exit /b 1
 rem Ours: Conker's reflections (texture generation on the CPU) and the RT64_PRESENT_LOG frame-timing log.
 call :patch "%D%\rt64" "%P%\rt64_conker.patch" || exit /b 1
+rem Ours: RT64's graphics layer can copy a picture back from the GPU (Photo Mode).
+call :patch "%D%\rt64\src\contrib\plume" "%P%\plume_conker.patch" || exit /b 1
 rem CBFD-Recompiled V0.1.6 renderer fixes (Conker snapping, shadows, drunk blur, Steam Deck bar).
 call :patch "%D%\rt64" "%P%\rt64_cbfd_016.patch" || exit /b 1
+rem Ours: Photo Mode turns off the in-between frames while the world is frozen.
+call :patch "%D%\rt64" "%P%\rt64_photo.patch" || exit /b 1
 call :patch "%D%\RecompFrontend\recompui\lib\RmlUi" "%P%\rmlui.patch" || exit /b 1
 rem Ours: lets the game add RT64 settings the Graphics tab doesn't have.
 call :patch "%D%\RecompFrontend" "%P%\recompfrontend_conker.patch" || exit /b 1
