@@ -76,7 +76,8 @@ Conker handles exactly as he always did.
 Turn the camera with the right stick or the mouse, and it stays where you put it. It doesn't go through walls,
 posts or the floor: it comes in where there's no room and glides back out, holds still next to moving objects,
 and stays above ground that rises behind Conker. It tilts a little with slopes, and tilting down past Conker looks
-up. Click the right stick to switch between near, middle and far, or use the mouse wheel.
+up. Click the right stick to switch between near, middle and far, or use the mouse wheel. **Camera: Turning
+Response** picks whether the stick's turning eases in and out (Smooth) or follows the stick at once (Direct).
 
 #### Twin-Stick Aiming
 * **Swap Sticks:** while aiming, the right stick aims and the left stick moves.
@@ -93,8 +94,8 @@ A red dot in the middle of the screen when Conker aims a gun that shoots straigh
 none for thrown things, which fly in an arc. The sniper scope keeps its own crosshair.
 
 #### Hold to Skip Cutscenes
-Hold L to skip any cutscene, even the first time and the ones the original never lets you skip. A ring fills
-while you hold, so you can't skip by accident. **Skip Intro** goes straight to the bar menu.
+Hold L (on the keyboard, the key you've set for L) to skip any cutscene, even the first time and the ones the
+original never lets you skip. A ring fills while you hold, so you can't skip by accident. **Skip Intro** goes straight to the bar menu.
 
 #### Photo Mode (experimental)
 Press **P** (or hold **L** and press **D-pad Down**) while playing: the game freezes, the HUD hides and the camera
