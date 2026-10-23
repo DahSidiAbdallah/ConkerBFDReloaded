@@ -139,6 +139,7 @@ namespace {
         ++vi_count;
         conker::frontend::on_vi();
         conker::testing::on_vi(g_rdram);
+        conker::save_states::on_vi();
         conker::qol::on_vi();
         if (g_rdram != nullptr) {
             conker::skip_intro_on_vi(g_rdram);

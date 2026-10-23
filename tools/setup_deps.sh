@@ -30,6 +30,7 @@ get RecompFrontend https://github.com/N64Recomp/RecompFrontend.git b1a1477c6556a
 patch_in "$D/N64ModernRuntime" "$P/n64modernruntime.patch"
 patch_in "$D/rt64" "$P/rt64.patch"
 patch_in "$D/N64ModernRuntime" "$P/n64modernruntime_conker.patch"
+patch_in "$D/N64ModernRuntime" "$P/n64modernruntime_savestates.patch"
 patch_in "$D/rt64" "$P/rt64_conker.patch"
 patch_in "$D/rt64/src/contrib/plume" "$P/plume_conker.patch"
 patch_in "$D/rt64" "$P/rt64_cbfd_016.patch"

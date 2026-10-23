@@ -113,6 +113,7 @@ namespace conker {
     void events_write(const std::filesystem::path& path);
     // scene_fixes.cpp: Skip Intro's steps.
     void skip_intro_on_vi(uint8_t* rdram);
+    void skip_intro_cancel(); // a save state was loaded: lift Skip Intro's black screen
     bool skip_intro_pressing_start();
 
     // pad_mappings.cpp: N64 pads whose C-buttons SDL maps as face buttons get them as the right stick
@@ -212,6 +213,13 @@ namespace conker {
         void update();
         // From the game thread, as the game starts a frame's display list.
         void game_frame();
+    }
+
+    // save_states.cpp: save states, a testing aid only (a savestates_enabled file in the settings folder, or
+    // CONKER_TEST_STATE_SAVE / CONKER_TEST_STATE_LOAD).
+    namespace save_states {
+        void init();  // at start (frontend.cpp), once SDL is up
+        void on_vi(); // every VI (main.cpp): a test run's save or load
     }
 
     // testing.cpp: fast-forward, game-time screenshots (environment variables).

@@ -63,6 +63,7 @@ add_executable(ConkerBFDReloaded
     src/render_fixes.cpp
     src/free_camera.cpp
     src/photo_mode.cpp
+    src/save_states.cpp
     src/pause_background.cpp
     src/fps_counter.cpp
     src/model_detail.cpp

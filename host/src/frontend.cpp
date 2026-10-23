@@ -484,6 +484,7 @@ namespace {
         NFD_Init(); // file dialogs (Load ROM, mods)
         conker_mouse_camera_init(); // the Free Camera's scroll wheel zoom (free_camera.cpp)
         conker::photo::init(); // Photo Mode's P key and picture (photo_mode.cpp)
+        conker::save_states::init(); // save states, for testing only (save_states.cpp)
         conker::key_prompts_init(); // Button Prompts: which device is in use (key_prompts.cpp)
         conker::qol::init(); // Pause When Unfocused watches the window's focus
         return nullptr;

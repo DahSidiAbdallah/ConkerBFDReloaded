@@ -275,6 +275,14 @@ void conker::skip_intro_on_vi(uint8_t* rdram) {
     }
 }
 
+// A save state was loaded (save_states.cpp): the game is wherever the state was, so Skip Intro's black
+// screen, which waits for the save menu, is lifted.
+void conker::skip_intro_cancel() {
+    if (skip_state != Skip::Off && skip_state != Skip::Done) {
+        finish_skip();
+    }
+}
+
 bool conker::skip_intro_pressing_start() {
     return skip_state == Skip::PressingStart;
 }
