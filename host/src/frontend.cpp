@@ -590,13 +590,47 @@ namespace {
         return recomp::get_config_path() / (game_id + u8".z64");
     }
 
+    // Whether a ROM file is in one of the byte-swapped orders (.v64, .n64), from its first word.
+    bool rom_file_byteswapped(const std::filesystem::path& path) {
+        std::ifstream file(path, std::ios::binary);
+        unsigned char start[4] = {};
+        file.read(reinterpret_cast<char*>(start), 4);
+        return (start[0] == 0x37 && start[1] == 0x80) || (start[0] == 0x40 && start[1] == 0x12 && start[2] == 0x37);
+    }
+
+    std::vector<char> read_whole(const std::filesystem::path& path) {
+        std::ifstream file(path, std::ios::binary);
+        return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    }
+
     void change_rom(const std::u8string& game_id, recompui::GameOption* option) {
         recompui::file::open_file_dialog([game_id, option](bool success, const std::filesystem::path& path) {
             if (!success) {
                 return;
             }
+            // A ROM hack in a byte-swapped order is a patch applied to a .v64 or .n64 copy of the US ROM: patches
+            // are made for .z64, so what they changed comes out scrambled once the ROM is put in order, while the
+            // untouched code still passes the check. The game crashed as it started (issue #31: the uncensored and
+            // German patches on a .v64 US ROM). Such a ROM is turned down, and the one in use kept.
+            const bool byteswapped = rom_file_byteswapped(path);
+            const std::filesystem::path stored = stored_rom_path(game_id);
+            const std::vector<char> previous = byteswapped ? read_whole(stored) : std::vector<char>();
             switch (recomp::select_rom(path, game_id)) {
                 case recomp::RomValidationError::Good: {
+                    if (byteswapped && rom_title(stored) == "ROM: Modified") {
+                        if (previous.empty()) {
+                            std::error_code ec;
+                            std::filesystem::remove(stored, ec);
+                        } else {
+                            std::ofstream out(stored, std::ios::binary | std::ios::trunc);
+                            out.write(previous.data(), (std::streamsize)previous.size());
+                        }
+                        recompui::message_box("This ROM looks like a patch applied to a byte-swapped (.v64 or .n64) "
+                            "copy of the US ROM. Patches are made for .z64 ROMs, so the patched parts come out scrambled "
+                            "and the game would crash. Convert your US ROM to .z64 first, apply the patch to that, then "
+                            "load the result. Your current ROM is still in use.");
+                        break;
+                    }
                     const std::string title = rom_title(stored_rom_path(game_id));
                     rom_button_name = button_name(title);
                     recompui::ContextId context = recompui::get_launcher_context_id();
