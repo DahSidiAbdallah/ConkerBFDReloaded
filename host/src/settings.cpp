@@ -614,6 +614,13 @@ float conker::camera_turn_speed() {
     return v != nullptr ? (float)(*v / 100.0) : 1.0f;
 }
 
+// Camera: Turning Response (look_aim.cpp): Direct turns the Free Camera without easing (issue #32).
+bool conker::camera_turn_direct() {
+    auto value = recompui::config::get_general_config().get_option_value("camera_turn_response");
+    const uint32_t* v = std::get_if<uint32_t>(&value);
+    return v != nullptr && *v == 1; // Direct
+}
+
 bool conker::free_camera_enabled() {
     return free_camera_mode != (uint32_t)FreeCamera::Off;
 }

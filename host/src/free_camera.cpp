@@ -85,6 +85,11 @@ namespace {
     // once (it mustn't go through walls); when there's room again, it eases back out over about
     // this many seconds, so a camera brushing along walls doesn't jump.
     constexpr float ease_out_seconds = 0.35f;
+    // A sudden pull in, by more than a quarter of the view's distance, is followed only once the next frame
+    // holds it too. Riding Franky (Haybot Wars), the collision held the eye a few times a second for one frame
+    // alone (shown 620, then 155 for one frame, then 620 again: a player's snapshots), and the view snapped in
+    // and eased back out each time (issue #34). A real wall holds it frame after frame: one frame later.
+    constexpr float sudden_in_share = 0.25f;
     // The camera's ball: the eye goes as far out along its line from the look-at point as a ball
     // of this radius fits without touching anything (walls, posts, floor, ceiling), as the game's
     // own camera keeps a 30-unit cylinder (+0x95C) clear for its 4:3 picture. The picture is cut
@@ -192,6 +197,7 @@ namespace {
         float slope = 0.0f;             // the ground's rise per unit along the view, as last measured
         float shown_slope = 0.0f;       // eased
         double last_view = 0.0;         // game seconds at the last view
+        bool sudden_in = false;         // last frame's collision pulled the eye in suddenly (sudden_in_share)
     } orbit;
     bool was_normal_camera = false; // conker::normal_camera (Camera: Field of View)
 
@@ -488,7 +494,8 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
         auto curve = [](float v) { return 0.5f * v + 0.5f * v * std::abs(v); };
         const float pixels_per_second = stick_degrees_per_second * conker::camera_turn_speed() / degrees_per_pixel;
         const float wanted_speed[2] = { curve(stick_x) * pixels_per_second, -curve(stick_y) * pixels_per_second * stick_tilt_share }; // pushed up: the view looks up
-        const float ease = 1.0f - std::exp(-seconds / stick_ease_seconds);
+        // Camera: Turning Response, Direct: no easing, the turn follows the stick at once (issue #32).
+        const float ease = conker::camera_turn_direct() ? 1.0f : 1.0f - std::exp(-seconds / stick_ease_seconds);
         for (int i = 0; i < 2; i++) {
             orbit.stick_speed[i] += (wanted_speed[i] - orbit.stick_speed[i]) * ease;
             if (wanted_speed[i] == 0.0f && std::abs(orbit.stick_speed[i]) < 1.0f) {
@@ -572,12 +579,21 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     const double now = conker::testing::game_seconds();
     const float seconds = (float)std::clamp(now - orbit.last_frame, 0.0, 0.1);
     orbit.last_frame = now;
-    // Slopes: Conker's rise per unit walked on the ground, along the view (the eye looks the other way
-    // from its direction, yaw). Stepping sideways to the view, or in the air, it's kept.
+    // Slopes: the ground's rise per unit Conker walks on it, along the view (the eye looks the other way
+    // from its direction, yaw). Stepping sideways to the view, or in the air, it's kept. The ground's
+    // height under him, not his own: riding Franky (Haybot Wars) he's on the ground for the game while
+    // Franky hops, his height going up and down by some 70 units, and each hop read as a steep slope
+    // tilted the view up and down several times a second (issue #34).
     {
         const gpr player = (gpr)(int32_t)player_object;
         const bool grounded = ((uint32_t)MEM_W(0x100, player) >> 24) == 0x01;
-        const float pos[3] = { read_float(rdram, player, 0x14), read_float(rdram, player, 0x18), read_float(rdram, player, 0x1C) };
+        float pos[3] = { read_float(rdram, player, 0x14), read_float(rdram, player, 0x18), read_float(rdram, player, 0x1C) };
+        if (grounded) {
+            const float floor = ground_under(rdram, ctx, pos[0], pos[1] + ground_climb, pos[2]);
+            if (floor > no_ground + 1.0f) {
+                pos[1] = floor;
+            }
+        }
         if (!grounded) {
             orbit.step_known = false;
         } else if (!orbit.step_known) {
@@ -812,7 +828,16 @@ extern "C" void conker_mouse_camera(uint8_t* rdram, recomp_context* ctx) {
             distance += eye[i] * eye[i];
         }
         distance = std::sqrt(distance);
-        if (orbit.shown_distance <= 0.0f || distance <= orbit.shown_distance) {
+        const bool sudden = orbit.shown_distance > 0.0f && distance < orbit.shown_distance * (1.0f - sudden_in_share);
+        const bool wait_a_frame = sudden && !orbit.sudden_in;
+        orbit.sudden_in = sudden;
+        if (wait_a_frame) {
+            if (distance > 0.0f) {
+                for (int i = 0; i < 3; i++) {
+                    write_float(rdram, camera, 0x2F8 + i * 4, look[i] + eye[i] * (orbit.shown_distance / distance));
+                }
+            }
+        } else if (orbit.shown_distance <= 0.0f || distance <= orbit.shown_distance) {
             orbit.shown_distance = distance;
         } else {
             orbit.shown_distance += (distance - orbit.shown_distance) * (1.0f - std::exp(-seconds / ease_out_seconds));
@@ -824,6 +849,7 @@ extern "C" void conker_mouse_camera(uint8_t* rdram, recomp_context* ctx) {
         }
     } else {
         orbit.shown_distance = 0.0f;
+        orbit.sudden_in = false;
     }
     static const bool trace = std::getenv("CONKER_CAM_TRACE") != nullptr;
     if (trace && orbit.engaged) {

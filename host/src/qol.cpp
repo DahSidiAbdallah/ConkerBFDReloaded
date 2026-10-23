@@ -38,6 +38,10 @@ extern SDL_Window* window; // frontend.cpp
 #include "recomp.h"
 #include "librecomp/game.hpp"
 #include "ultramodern/ultramodern.hpp"
+#include "recompinput/input_state.h"
+#include "recompinput/input_types.h"
+#include "recompinput/profiles.h"
+#include "recompinput/recompinput.h"
 #include "recompui/recompui.h"
 #include "elements/ui_element.h"
 #include "elements/ui_image.h"
@@ -151,6 +155,38 @@ namespace {
     recompui::Element* dots[ring_dots] = {};
     int lit_shown = -1;
     const recompui::Color dot_off{ 0xFF, 0xF4, 0xD6, 0x50 }, dot_on{ 0xF0, 0x7A, 0x1E, 0xFF };
+    recompui::Label* skip_button = nullptr; // L
+    recompui::Label* skip_key = nullptr;    // the keyboard's key, in the prompt font
+    int skip_button_keyboard = -1; // the button shown: 1 the keyboard's key, 0 the controller's L
+
+    // The key L is bound to on the keyboard, as prompt-font text (empty if none).
+    std::string keyboard_l() {
+        const int profile = recompinput::profiles::get_sp_keyboard_profile_index();
+        for (size_t i = 0; i < recompinput::num_bindings_per_input; i++) {
+            const recompinput::InputField& field = recompinput::profiles::get_input_binding(profile, recompinput::GameInput::L, i);
+            if (!field.is_empty()) {
+                return field.to_string();
+            }
+        }
+        return "";
+    }
+
+    // The ring's button: L, or while the keyboard is in use, the key L is bound to there.
+    void show_skip_button() {
+        const std::string key = conker::keyboard_prompts_in_use() ? keyboard_l() : std::string();
+        const int keyboard = key.empty() ? 0 : 1;
+        if (keyboard == skip_button_keyboard) {
+            return;
+        }
+        skip_button_keyboard = keyboard;
+        skip_context.open();
+        if (keyboard) {
+            skip_key->set_text(key);
+        }
+        skip_button->set_display(keyboard ? recompui::Display::None : recompui::Display::Block);
+        skip_key->set_display(keyboard ? recompui::Display::Block : recompui::Display::None);
+        skip_context.close();
+    }
 
     void create_skip() {
         skip_context = recompui::create_context();
@@ -170,11 +206,23 @@ namespace {
             d->set_background_color(dot_off);
             dots[k] = d;
         }
-        recompui::Label* button = skip_context.create_element<recompui::Label>(root, "L", recompui::LabelStyle::Large);
-        button->set_position(recompui::Position::Absolute);
-        button->set_right(ring_right - 9.0f);
-        button->set_bottom(ring_bottom - 16.0f);
-        button->set_color({ 0xFF, 0xF4, 0xD6, 0xFF });
+        skip_button = skip_context.create_element<recompui::Label>(root, "L", recompui::LabelStyle::Large);
+        skip_button->set_position(recompui::Position::Absolute);
+        skip_button->set_right(ring_right - 9.0f);
+        skip_button->set_bottom(ring_bottom - 16.0f);
+        skip_button->set_color({ 0xFF, 0xF4, 0xD6, 0xFF });
+        skip_key = skip_context.create_element<recompui::Label>(root, "", recompui::LabelStyle::Large);
+        skip_key->set_position(recompui::Position::Absolute);
+        // A box as wide as the ring's inside, centred on it, the key centred in it.
+        skip_key->set_right(ring_right - ring_radius);
+        skip_key->set_width(ring_radius * 2.0f);
+        skip_key->set_text_align(recompui::TextAlign::Center);
+        skip_key->set_bottom(ring_bottom - 15.0f);
+        skip_key->set_font_family("promptfont");
+        skip_key->set_font_weight(400);
+        skip_key->set_color({ 0xFF, 0xF4, 0xD6, 0xFF });
+        skip_key->set_display(recompui::Display::None);
+        skip_button_keyboard = 0;
         recompui::Label* text = skip_context.create_element<recompui::Label>(root, "Hold to Skip", recompui::LabelStyle::Large);
         text->set_position(recompui::Position::Absolute);
         text->set_right(ring_right + ring_radius + 18.0f);
@@ -201,6 +249,7 @@ namespace {
             recompui::show_context(skip_context, "");
             lit_shown = -1;
         }
+        show_skip_button();
         const int lit = std::clamp((int)std::lround(hold_progress.load() * ring_dots), 0, ring_dots);
         if (lit != lit_shown) {
             skip_context.open();

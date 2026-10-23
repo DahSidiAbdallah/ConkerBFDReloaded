@@ -137,6 +137,8 @@ namespace {
         const std::string gyro_invert = "look_gyro_invert";
         const std::string camera_turn_invert = "camera_invert_turning";
         const std::string camera_turn_speed = "camera_turn_speed";
+        // Ours (free_camera.cpp, issue #32):
+        const std::string camera_turn_response = "camera_turn_response";
         // From CBFD-Recompiled V0.1.5 (same ids, so their settings carry over):
         const std::string camera_fov = "camera_field_of_view_degrees";
         // From CBFD-Recompiled V0.1.6 (same ids):
@@ -202,6 +204,11 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
         "Sets how fast the camera turns left and right in single player, with the right stick or C-Left and C-Right. "
         "Strafing in multiplayer isn't affected.",
         50.0, 300.0, 5.0, 0, true, 100.0);
+    config.add_enum_option(options::camera_turn_response, "Camera: Turning Response",
+        "How the Free Camera follows the right stick. <recomp-color primary>Smooth</recomp-color> eases the turning in "
+        "and out, so it starts and stops gently. <recomp-color primary>Direct</recomp-color> turns at once, as fast as "
+        "the stick is pushed, and stops as soon as you let go.",
+        response, Response::Smooth);
     config.add_number_option(options::camera_fov, "Camera: Field of View",
         "How wide the normal camera sees, in degrees, as its vertical field of view (the same whatever the aspect ratio). "
         "<recomp-color primary>50</recomp-color> matches the original game (60.6 degrees across at 4:3). More shows more "

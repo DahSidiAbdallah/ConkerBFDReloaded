@@ -82,6 +82,7 @@ namespace conker {
     bool camera_inverted();
     bool camera_tilt_inverted();
     float camera_turn_speed();
+    bool camera_turn_direct();
     float camera_field_of_view();
     // free_camera.cpp: whether player 1's game camera was the normal follow camera last frame (not
     // R-Look, aiming, cutscenes or another special camera).
