@@ -72,8 +72,10 @@ extern "C" void conker_depth_copy_probes(uint8_t* rdram, recomp_context* ctx) {
 // free list made the allocator find no room. And the limit was worked out from how far apart the
 // two lists are, their size only if the heap put them side by side.
 //
-// So each list gets half the budget again (at least 1000 commands), and the limit is the list's own
-// size less 800.
+// So each list gets half the budget again (at least 1000 commands, at most 4000), and the limit is
+// the list's own size less 800. The multiplayer arenas' budgets are far larger (14400 to 26400
+// commands, against 6400 to 8400 in the story) and their heap is tighter: half again of those ran the
+// heap out in Tank and Heist and stopped the game, hence the cap.
 #include <algorithm>
 #include <cstdint>
 
@@ -89,7 +91,7 @@ namespace {
     uint32_t list_commands(uint8_t* rdram) {
         const uint32_t game = game_list_commands(rdram);
         const uint32_t budget = game > display_list_room ? game - display_list_room : 0;
-        return game + std::max<uint32_t>(budget / 2, 1000);
+        return game + std::clamp<uint32_t>(budget / 2, 1000, 4000);
     }
 }
 

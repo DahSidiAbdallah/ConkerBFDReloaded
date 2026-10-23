@@ -290,6 +290,101 @@ extern "C" void conker_bubble_end(uint8_t* rdram, recomp_context* ctx) {
     }
 }
 
+// The bullet holes and cracks on the screen in It's War. func_150E76D0 makes each against a side of
+// the screen: on the left its x is its half width less 145 (the screen's middle is 146 across), so its left edge
+// is at 1, the 4:3 screen's; on the right 145 less its half width (mirrored), its right edge at 291. In
+// widescreen they hung in the picture beside the 4:3 frame. Each is moved out as far as the window reaches past
+// the 4:3 screen: the left one at 0x150E789C ($sp + 0x54, its x), the right one at 0x150E7880 ($f18, its x,
+// stored to $sp + 0x54 in the branch's delay slot).
+namespace {
+    float hole_widening(uint8_t* rdram) {
+        const float ratio = widescreen_ratio();
+        if (ratio <= 1.0f) {
+            return 0.0f;
+        }
+        const float half_frame = (float)MEM_W(0, (gpr)(int32_t)0x800BE620) * 0.5f; // D_800BE620
+        return half_frame * (ratio - 1.0f);
+    }
+}
+
+extern "C" void conker_widen_left_hole(uint8_t* rdram, recomp_context* ctx) {
+    const gpr sp = ctx->r29;
+    write_float(rdram, sp, 0x54, stack_float(rdram, sp, 0x54) - hole_widening(rdram));
+}
+
+extern "C" void conker_widen_right_hole(uint8_t* rdram, recomp_context* ctx) {
+    ctx->f18.fl += hole_widening(rdram);
+}
+
+// Overlay pieces against a side of the screen: the wasp hive turret's frame is func_15154D80's
+// pieces in the 292-wide 4:3 screen, its top and bottom bars four tiles each from x 3 to 289, the outer ones the
+// bars' rounded ends. In widescreen the frame stopped at the 4:3 screen's edges, the picture going on beside it.
+// A wide piece (a fifth of the screen or more) whose left edge is at or past the 4:3 screen's (within 4 pixels),
+// or its right edge at or past its right, is stretched out as far as the window reaches past it: the bars' ends
+// reach the window's edges, and the pieces inside them (the bars' middle, the gun mounts, the sights) stay as
+// they are. The holes and cracks (above) are moved out instead, and are narrower, so they don't count. At
+// 0x15155100 $f14 is the piece's middle and $f18 its half width, in the screen's pixels, before its rectangle is
+// worked out from them (its texture's steps from its width, so the texture is stretched with it).
+extern "C" void conker_widen_overlay_piece(uint8_t* rdram, recomp_context* ctx) {
+    const float extra = hole_widening(rdram);
+    if (extra <= 0.0f) {
+        return;
+    }
+    constexpr float edge_slack = 4.0f;
+    const float frame_width = (float)MEM_W(0, (gpr)(int32_t)0x800BE620); // D_800BE620
+    float left = ctx->f14.fl - ctx->f18.fl;
+    float right = ctx->f14.fl + ctx->f18.fl;
+    if (right - left < frame_width * 0.2f) {
+        return;
+    }
+    const bool at_left = left <= edge_slack;
+    const bool at_right = right >= frame_width - edge_slack;
+    if (!at_left && !at_right) {
+        return;
+    }
+    if (at_left) {
+        left -= extra;
+    }
+    if (at_right) {
+        right += extra;
+    }
+    ctx->f14.fl = (left + right) * 0.5f;
+    ctx->f18.fl = (right - left) * 0.5f;
+}
+
+// Screen overlays drawn with func_15154D80: the bullet holes (above), and others like them. Like the sprites,
+// its G_TEXRECT has its corners clamped to 0 and its texture start moved on to match, so a hole moved past the
+// 4:3 frame's left edge would be cut there. At 0x15155470 the rectangle and its two G_RDPHALF words are
+// written ($t4 is the first half, 8 past the rectangle). The corners as worked out, in 10.2 fixed point, are at $sp + 0x60 (left),
+// 0x5C (top), 0x58 (right) and 0x54 (bottom); the texture start before the clamp's change in $t5 and $ra, the
+// steps in $t3 and $t2. A clamped one is rewritten as RT64's extended rectangle, three commands as well, in
+// frames whose camera pass enabled the extended GBI (conker_camera_pass_sync).
+extern "C" void conker_emit_overlay_texrect(uint8_t* rdram, recomp_context* ctx) {
+    if (!extended_enabled || widescreen_ratio() <= 1.0f) {
+        return;
+    }
+    const gpr sp = ctx->r29;
+    const int32_t ulx = (int32_t)stack_float(rdram, sp, 0x60);
+    const int32_t uly = (int32_t)stack_float(rdram, sp, 0x5C);
+    const int32_t lrx = (int32_t)stack_float(rdram, sp, 0x58);
+    const int32_t lry = (int32_t)stack_float(rdram, sp, 0x54);
+    if (ulx >= 0 && uly >= 0) {
+        return; // drawn as the game wrote it
+    }
+    gpr dl = ctx->r12 - 8; // $t4
+    if (((uint32_t)MEM_W(0, dl) >> 24) != 0xE4 || ((uint32_t)MEM_W(8, dl) >> 24) != 0xE1 || ((uint32_t)MEM_W(16, dl) >> 24) != 0xF1) {
+        return;
+    }
+    const uint32_t s = (uint32_t)ctx->r13 & 0xFFFF;    // $t5
+    const uint32_t t = (uint32_t)ctx->r31 & 0xFFFF;    // $ra
+    const uint32_t dsdx = (uint32_t)ctx->r11 & 0xFFFF; // $t3
+    const uint32_t dtdy = (uint32_t)ctx->r10 & 0xFFFF; // $t2
+    const uint32_t tile = 0;
+    put_command(rdram, dl, (rt64_extended_opcode << 24) | g_ex_texrect_v1, tile | (g_ex_origin_none << 3) | (g_ex_origin_none << 15));
+    put_command(rdram, dl, ((uint32_t)(ulx & 0xFFFF) << 16) | (uint32_t)(uly & 0xFFFF), ((uint32_t)(lrx & 0xFFFF) << 16) | (uint32_t)(lry & 0xFFFF));
+    put_command(rdram, dl, (s << 16) | t, (dsdx << 16) | dtdy);
+}
+
 // func_151D5E90 (and func_151D6418) draw a saved copy of the frame, such as the
 // pause menu's blurred background, as 42 textured tiles. The copy only holds the
 // 4:3 frame, so RT64 draws the tiles in the 4:3 area and the widened sides show
@@ -306,6 +401,11 @@ extern "C" void conker_bubble_end(uint8_t* rdram, recomp_context* ctx) {
 // frame, then copies the frame into it. That copy is RT64's widened frame and is drawn back
 // across the whole width already, and zooming it each frame zoomed the last frame's ghost
 // again on every pass, dragging the picture into streaks.
+//
+// The Haybot's red view (Barn Boys, issue #33) is func_151A5170 drawing the frame back over itself, tinted, in
+// strips of up to 256 pixels read straight from the colour image: only across the camera's 4:3 bounds, so in
+// widescreen the right of the window wasn't tinted (the left strip, touching the frame's side, was widened by
+// RT64). It's stretched as the pause's copy is: across the window, each strip from its part of the widened frame.
 namespace {
     constexpr uint32_t g_ex_setrectaspect_v1 = 0x000033;
     constexpr uint32_t g_ex_aspect_auto = 0x0;
@@ -314,6 +414,8 @@ namespace {
     constexpr uint32_t g_texrect = 0xE4;
 
     gpr frame_copy_dl_start = 0;
+    // The function running now draws the frame back over itself, tinted (func_151A5170).
+    bool frame_copy_tint = false;
 
     bool is_sync(uint8_t* rdram, gpr cmd) {
         uint32_t w0 = (uint32_t)MEM_W(0, cmd);
@@ -343,15 +445,74 @@ extern "C" void conker_frame_copy_begin(uint8_t* rdram, recomp_context* ctx) {
     }
 }
 
+// The tinted copy's strips: two columns, x 2 to 258 in rows of 8 and 258 to 294 in rows of 54 (each strip a
+// G_SETTIMG of the colour image, G_SETTILE, G_LOADTILE, G_SETTILE, G_SETTILESIZE and a G_TEXRECT, after a sync).
+// RT64 drew the first column from its copy of the frame, but not the second, which it read from RDRAM, an old
+// picture. Two things kept the copy from it:
+// - The tile's size (G_SETTILESIZE) is a texel more each way than what's loaded (a strip of 54 rows is given 0 to
+//   54, inclusive), so the texture memory RT64 takes it to sample runs past what was loaded (0 to 495 words of a
+//   486-word load) and no copy matches. On the N64 that row and column are never drawn. (The first column's does
+//   too, but its 8 rows fill all of texture memory, which RT64 then checks whole.)
+// - The camera is x 2 to 294 and the colour image 292 wide, so RT64's copy of the second column stops at the
+//   image's edge, 34 pixels, and its rectangle samples 36.
+// So each strip's tile is given the size it was loaded, and a strip reaching past the image's last column stops
+// there (its rectangle, tile and load: the camera's 2-pixel border at the right, past the picture).
+namespace {
+    void fit_tint_copy(uint8_t* rdram, gpr start, gpr end) {
+        constexpr int strip_commands = 8; // from the G_SETTIMG to the G_TEXRECT's second RDPHALF
+        constexpr uint8_t strip_ops[strip_commands] = { 0xFD, 0xF5, 0xF4, 0xF5, 0xF2, 0xE4, 0xE1, 0xF1 };
+        for (gpr cmd = start; cmd + strip_commands * 8 <= end; cmd += 8) {
+            bool strip = true;
+            for (int i = 0; i < strip_commands && strip; i++) {
+                strip = ((uint32_t)MEM_W(i * 8, cmd) >> 24) == strip_ops[i];
+            }
+            if (!strip) {
+                continue;
+            }
+            const gpr image = cmd, load = cmd + 2 * 8, size = cmd + 4 * 8, rect = cmd + 5 * 8;
+            cmd += (strip_commands - 1) * 8;
+            const uint32_t edge = (((uint32_t)MEM_W(0, image) & 0xFFF) + 1) << 2; // the image's width, 10.2
+            const uint32_t rect_w0 = (uint32_t)MEM_W(0, rect), rect_w1 = (uint32_t)MEM_W(4, rect);
+            const uint32_t ulx = (rect_w1 >> 12) & 0xFFF, uly = rect_w1 & 0xFFF;
+            uint32_t lrx = (rect_w0 >> 12) & 0xFFF;
+            const uint32_t lry = rect_w0 & 0xFFF;
+            if (ulx >= edge || lrx <= ulx + 4 || lry <= uly + 4) {
+                continue;
+            }
+            if (lrx > edge) {
+                lrx = edge;
+                MEM_W(0, rect) = (int32_t)((rect_w0 & ~(0xFFFu << 12)) | (lrx << 12));
+                const uint32_t load_w1 = (uint32_t)MEM_W(4, load);
+                if (((load_w1 >> 12) & 0xFFF) > edge - 4) {
+                    MEM_W(4, load) = (int32_t)((load_w1 & ~(0xFFFu << 12)) | ((edge - 4) << 12));
+                }
+            }
+            // The tile: from 0 to its last texel, inclusive, as wide and tall as the rectangle draws it.
+            const uint32_t size_w1 = (uint32_t)MEM_W(4, size);
+            MEM_W(4, size) = (int32_t)((size_w1 & 0x07000000u) | ((lrx - ulx - 4) << 12) | (lry - uly - 4));
+        }
+    }
+}
+
+// func_151A5170, at its first instruction: $a0 is where it writes its first command (a pipe sync).
+extern "C" void conker_tint_copy_begin(uint8_t* rdram, recomp_context* ctx) {
+    frame_copy_dl_start = ctx->r4;
+    frame_copy_tint = true;
+}
+
 // At its return: $v0 is the end of what it wrote.
 extern "C" void conker_frame_copy_end(uint8_t* rdram, recomp_context* ctx) {
     gpr start = frame_copy_dl_start;
     gpr end = ctx->r2;
+    const bool tint = frame_copy_tint;
     frame_copy_dl_start = 0;
+    frame_copy_tint = false;
     if (start == 0 || end <= start || end - start > 0x10000) {
         return;
     }
-    if (conker_pause_background_redraw(rdram, start, end)) {
+    if (tint) {
+        fit_tint_copy(rdram, start, end);
+    } else if (conker_pause_background_redraw(rdram, start, end)) {
         return;
     }
     gpr syncs_before[2] = { 0, 0 };
@@ -376,7 +537,7 @@ extern "C" void conker_frame_copy_end(uint8_t* rdram, recomp_context* ctx) {
     gpr dl = syncs_before[0];
     put_command(rdram, dl, (rt64_hook_opcode << 24) | rt64_hook_magic, (rt64_hook_op_enable << 28) | rt64_extended_opcode);
     dl = syncs_before[1];
-    put_command(rdram, dl, (rt64_extended_opcode << 24) | g_ex_setrectaspect_v1, conker_pause_background_stretch() ? g_ex_aspect_stretch : g_ex_aspect_zoom);
+    put_command(rdram, dl, (rt64_extended_opcode << 24) | g_ex_setrectaspect_v1, (tint || conker_pause_background_stretch()) ? g_ex_aspect_stretch : g_ex_aspect_zoom);
     dl = last_sync;
     put_command(rdram, dl, (rt64_extended_opcode << 24) | g_ex_setrectaspect_v1, g_ex_aspect_auto);
 }

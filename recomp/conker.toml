@@ -360,6 +360,33 @@ func = "func_15130A9C"
 before_vram = 0x15131168
 text = "{ extern void conker_emit_sprite_texrect(uint8_t*, recomp_context*); conker_emit_sprite_texrect(rdram, ctx); goto L_15131360; }"
 
+# Widescreen: the bullet holes and cracks on the screen (It's War). func_150E76D0 puts each against a side of
+# the 4:3 screen; it's moved out to the window's edge: the left one's x at $sp + 0x54, the right one's in $f18
+# (stored there in the branch's delay slot).
+[[patches.hook]]
+func = "func_150E76D0"
+before_vram = 0x150E789C
+text = "{ extern void conker_widen_left_hole(uint8_t*, recomp_context*); conker_widen_left_hole(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_150E76D0"
+before_vram = 0x150E7880
+text = "{ extern void conker_widen_right_hole(uint8_t*, recomp_context*); conker_widen_right_hole(rdram, ctx); }"
+
+# func_15154D80's overlay pieces (the holes, the wasp hive turret's frame...): a piece against a side of the
+# 4:3 screen is stretched to the window's ($f14 its middle, $f18 its half width, at 0x15155100).
+[[patches.hook]]
+func = "func_15154D80"
+before_vram = 0x15155100
+text = "{ extern void conker_widen_overlay_piece(uint8_t*, recomp_context*); conker_widen_overlay_piece(rdram, ctx); }"
+
+# func_15154D80's rectangles (the holes) clamp their left edge at 0; once the rectangle is written ($t4 is 8
+# past it), it's rewritten as RT64's extended one.
+[[patches.hook]]
+func = "func_15154D80"
+before_vram = 0x15155470
+text = "{ extern void conker_emit_overlay_texrect(uint8_t*, recomp_context*); conker_emit_overlay_texrect(rdram, ctx); }"
+
 [[patches.hook]]
 func = "func_15130A9C"
 before_vram = 0x15130DA0
@@ -400,6 +427,18 @@ text = "{ extern void conker_frame_copy_begin(uint8_t*, recomp_context*); conker
 [[patches.hook]]
 func = "func_151D6418"
 before_vram = 0x151D66E8
+text = "{ extern void conker_frame_copy_end(uint8_t*, recomp_context*); conker_frame_copy_end(rdram, ctx); }"
+
+# The Haybot's red view (Barn Boys, issue #33): func_151A5170 draws the frame back over itself in strips,
+# tinted, as the pause's copy above is drawn; stretched across the window the same way (host/src/widescreen.cpp).
+[[patches.hook]]
+func = "func_151A5170"
+before_vram = 0x151A5170
+text = "{ extern void conker_tint_copy_begin(uint8_t*, recomp_context*); conker_tint_copy_begin(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_151A5170"
+before_vram = 0x151A55A4
 text = "{ extern void conker_frame_copy_end(uint8_t*, recomp_context*); conker_frame_copy_end(rdram, ctx); }"
 
 # Frame interpolation: each game object's drawing (func_1502CCFC) is wrapped in an

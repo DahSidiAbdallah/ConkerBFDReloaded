@@ -20,6 +20,7 @@ rem CBFD-Recompiled V0.1.6 renderer fixes (Conker snapping, shadows, drunk blur,
 call :patch "%D%\rt64" "%P%\rt64_cbfd_016.patch" || exit /b 1
 rem Ours: Photo Mode turns off the in-between frames while the world is frozen.
 call :patch "%D%\rt64" "%P%\rt64_photo.patch" || exit /b 1
+call :patch "%D%\rt64" "%P%\rt64_split_screen.patch" || exit /b 1
 call :patch "%D%\RecompFrontend\recompui\lib\RmlUi" "%P%\rmlui.patch" || exit /b 1
 rem Ours: lets the game add RT64 settings the Graphics tab doesn't have.
 call :patch "%D%\RecompFrontend" "%P%\recompfrontend_conker.patch" || exit /b 1
