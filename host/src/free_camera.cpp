@@ -972,6 +972,34 @@ extern "C" void conker_mouse_camera_view(uint8_t* rdram, recomp_context* ctx) {
     write_float(rdram, look, 8, ez + lz * scale);
 }
 
+// func_1512523C (at its return, 0x15125324; $a0 the camera) works out the camera's pitch from its eye and look-at
+// point, in degrees at +0x388 and radians at +0x398, before the view is built. While the orbit aims the view up
+// (above), that was still the pitch without the aim, and what the game draws from it didn't match the picture: looking
+// up from low, most of it stayed black (issue #35; the look mode, which tilts the camera itself, was fine). The aim the
+// view gets is added to both.
+extern "C" void conker_mouse_camera_pitch(uint8_t* rdram, recomp_context* ctx) {
+    const gpr camera = ctx->r4;
+    if (orbit.aim <= 0.0f || !orbit.engaged || (uint32_t)camera != (uint32_t)MEM_W(0, (gpr)(int32_t)current_camera)) {
+        return;
+    }
+    float d[3];
+    for (int i = 0; i < 3; i++) {
+        d[i] = read_float(rdram, camera, 0x2BC + i * 4) - read_float(rdram, camera, 0x2F8 + i * 4);
+    }
+    const float across = std::sqrt(d[0] * d[0] + d[2] * d[2]);
+    if (across < 1.0f) {
+        return;
+    }
+    const float base = std::atan2(d[1], across);
+    const float added = std::min(base + orbit.aim, highest_view) - base; // as conker_mouse_camera_view aims it
+    if (added <= 0.0f) {
+        return;
+    }
+    const float degrees = read_float(rdram, camera, 0x388) + added / degrees_to_radians;
+    write_float(rdram, camera, 0x388, degrees);
+    write_float(rdram, camera, 0x398, degrees * read_float(rdram, (gpr)(int32_t)0x800A3520, 0)); // D_800A3520
+}
+
 bool conker::normal_camera() {
     return was_normal_camera;
 }

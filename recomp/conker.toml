@@ -940,6 +940,13 @@ text = "{ extern void conker_look_view(uint8_t*, recomp_context*); conker_look_v
 # Free camera looking up (host/src/free_camera.cpp): func_1512C490 at 0x1512C844, about to build the view from its
 # copies of the eye ($sp+0xEC) and the look-at point ($sp+0xE0): tilted up past where the eye stops, the copy of the
 # look-at point is turned up about the eye.
+# Free camera looking up (issue #35): func_1512523C works out the camera's pitch from its eye and look-at point
+# (+0x388 degrees, +0x398 radians); at its return the view's aim up is added (host/src/free_camera.cpp).
+[[patches.hook]]
+func = "func_1512523C"
+before_vram = 0x15125324
+text = "{ extern void conker_mouse_camera_pitch(uint8_t*, recomp_context*); conker_mouse_camera_pitch(rdram, ctx); }"
+
 [[patches.hook]]
 func = "func_1512C490"
 before_vram = 0x1512C844
