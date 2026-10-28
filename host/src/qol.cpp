@@ -493,6 +493,10 @@ void conker::qol::set_player_buttons(uint16_t buttons) {
     player_buttons = buttons;
 }
 
+uint16_t conker::qol::get_player_buttons() {
+    return player_buttons.load();
+}
+
 // Hold to Skip in the game over: A pressed and let go in turn (a few frames each, as the game takes presses) until
 // the game over is no longer playing (to the menu), so that press can't reach the menu's PLAY.
 uint16_t conker::qol::apply_skip_press(uint16_t buttons) {
@@ -583,7 +587,17 @@ static void update_on_foot(uint8_t* rdram) {
     constexpr int32_t player = (int32_t)0x800CC2D0;
     const uint8_t flags = (uint8_t)((uint32_t)MEM_W(0, (gpr)(player + 0x100)) >> 24);
     const uint16_t animation = (uint16_t)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16);
-    on_foot = flags == 0x01 && on_foot_animation(animation);
+    // A few frames off his feet are let through: walking slowly over uneven ground (the straw on the barn roof)
+    // he leaves it, or changes animation, for a frame now and then, and the walk let go of the stick each time,
+    // so he ran for a frame and stuttered (issue #38). Off his feet longer (a jump, swimming), the stick is his.
+    constexpr int off_foot_frames_allowed = 8; // VIs, about an eighth of a second
+    static int off_foot_frames = off_foot_frames_allowed;
+    if (flags == 0x01 && on_foot_animation(animation)) {
+        off_foot_frames = 0;
+    } else if (off_foot_frames < off_foot_frames_allowed) {
+        off_foot_frames++;
+    }
+    on_foot = off_foot_frames < off_foot_frames_allowed;
     // Air Meter: Conker's time underwater (+0xB2, see Longer Breath), while the game isn't paused.
     air_used = (uint16_t)MEM_HU(0, (gpr)(player + 0xB2));
     air_paused = MEM_BU(0, (gpr)(int32_t)0x800BEAC0) != 0;

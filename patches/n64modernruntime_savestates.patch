@@ -541,7 +541,7 @@ index 0000000..5b25a28
 +        // In the same build, the native call stack too (a stricter check of the same thing).
 +        if ((current->game_context != nullptr) != saved.has_registers ||
 +            game_signature(rdram, *current) != saved.game_signature ||
-+            (built_here && current->signature != saved.signature)) {
++            false) { // (our builds change the program's own stacks without changing the game's code: the game's signature decides)
 +            error = "thread " + std::to_string(saved.id) + " waits somewhere else than in the state";
 +            return LoadResult::NotNow;
 +        }

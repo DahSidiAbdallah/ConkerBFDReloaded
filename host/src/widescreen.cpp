@@ -470,6 +470,7 @@ namespace {
                 continue;
             }
             const gpr image = cmd, load = cmd + 2 * 8, size = cmd + 4 * 8, rect = cmd + 5 * 8;
+            const gpr strip_at = cmd;
             cmd += (strip_commands - 1) * 8;
             const uint32_t edge = (((uint32_t)MEM_W(0, image) & 0xFFF) + 1) << 2; // the image's width, 10.2
             const uint32_t rect_w0 = (uint32_t)MEM_W(0, rect), rect_w1 = (uint32_t)MEM_W(4, rect);
@@ -490,6 +491,17 @@ namespace {
             // The tile: from 0 to its last texel, inclusive, as wide and tall as the rectangle draws it.
             const uint32_t size_w1 = (uint32_t)MEM_W(4, size);
             MEM_W(4, size) = (int32_t)((size_w1 & 0x07000000u) | ((lrx - ulx - 4) << 12) | (lry - uly - 4));
+            // The first column starts at the camera's left edge, 2 pixels in: stretched across the window that
+            // left a strip untinted at the left (issue #37). It's drawn from the image's edge instead, its first
+            // texel clamped over those 2 pixels (texture start moved back as far, the tile set to clamp).
+            if (ulx > 0 && ulx <= 8) {
+                const gpr render_tile = strip_at + 3 * 8, half = strip_at + 6 * 8;
+                MEM_W(4, rect) = (int32_t)(rect_w1 & ~(0xFFFu << 12));
+                const uint32_t half_w1 = (uint32_t)MEM_W(4, half);
+                const uint32_t s = ((half_w1 >> 16) - ulx * 8) & 0xFFFF; // 10.2 pixels to 10.5 texels
+                MEM_W(4, half) = (int32_t)((half_w1 & 0xFFFF) | (s << 16));
+                MEM_W(4, render_tile) = (int32_t)((uint32_t)MEM_W(4, render_tile) | (0x2u << 8)); // cms: clamp
+            }
         }
     }
 }
