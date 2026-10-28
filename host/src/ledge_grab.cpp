@@ -120,12 +120,14 @@ namespace {
         bool on = false;
         int32_t since = 0;
         float highest = 0.0f;
+        bool release_ready = false; // B has been released during this hold
     } hold;
 }
 
 extern "C" void func_1505E650(uint8_t* rdram, recomp_context* ctx); // the game: set an object's animation
 
-// Each frame, at its start (testing.cpp's frame hook): the safety net (above).
+// Each frame, at its end (testing.cpp's frame hook): B releases a hang immediately;
+// the safety net also releases a hold that has slid down the wall.
 extern "C" void conker_ledge_grab_watchdog(uint8_t* rdram, recomp_context* ctx) {
     const uint16_t anim = animation(rdram);
     const bool holding = anim == hanging_animation || anim == climbing_animation || anim == hopping_animation;
@@ -133,14 +135,19 @@ extern "C" void conker_ledge_grab_watchdog(uint8_t* rdram, recomp_context* ctx) 
         hold.on = false;
         return;
     }
+    constexpr uint16_t button_b = 0x4000;
+    const bool b_down = (conker::qol::get_player_buttons() & button_b) != 0;
     const int32_t timer = MEM_W(0, (gpr)(int32_t)0x800E0A90);
     const float y = real(rdram, player + 0x18);
     if (!hold.on || timer < hold.since) {
         hold = { true, timer, y };
-        return;
     }
+    // Require a fresh press after hanging, not an attack held while catching the edge.
+    // Climbing and hopping keep their original controls.
+    const bool release_pressed = anim == hanging_animation && hold.release_ready && b_down;
+    hold.release_ready = anim == hanging_animation && !b_down;
     hold.highest = std::max(hold.highest, y);
-    if (timer - hold.since < stuck_after || hold.highest - y < stuck_sink) {
+    if (!release_pressed && (timer - hold.since < stuck_after || hold.highest - y < stuck_sink)) {
         return;
     }
     // Let go: the falling animation, in the air as when walking off, no speed left over.
@@ -157,7 +164,9 @@ extern "C" void conker_ledge_grab_watchdog(uint8_t* rdram, recomp_context* ctx) 
     set_real(rdram, player + 0x1CC, y); // a fall from here, not from the ledge
     fall.caught = true;
     hold.on = false;
-    std::printf("[grab] safety net: let go after sliding %.0f below the hold (animation %02X)\n", hold.highest - y, anim);
+    if (!release_pressed) {
+        std::printf("[grab] safety net: let go after sliding %.0f below the hold (animation %02X)\n", hold.highest - y, anim);
+    }
 }
 
 // func_150AC3E4 before 0x150AC474: $t0 is the mask about to be stored, $a3 the object falling.

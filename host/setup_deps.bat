@@ -13,6 +13,7 @@ call :patch "%D%\rt64" "%P%\rt64.patch" || exit /b 1
 rem Ours: fast-forward (Skip Intro, test runs) and leaving frames undrawn.
 call :patch "%D%\N64ModernRuntime" "%P%\n64modernruntime_conker.patch" || exit /b 1
 call :patch "%D%\N64ModernRuntime" "%P%\n64modernruntime_savestates.patch" || exit /b 1
+call :patch "%D%\N64ModernRuntime" "%P%\n64modernruntime_shutdown.patch" || exit /b 1
 rem Ours: Conker's reflections (texture generation on the CPU) and the RT64_PRESENT_LOG frame-timing log.
 call :patch "%D%\rt64" "%P%\rt64_conker.patch" || exit /b 1
 rem Ours: RT64's graphics layer can copy a picture back from the GPU (Photo Mode).

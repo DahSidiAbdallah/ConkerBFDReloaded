@@ -1,0 +1,60 @@
+--- a/ultramodern/src/timer.cpp
++++ b/ultramodern/src/timer.cpp
+@@ -47,6 +47,7 @@
+     std::thread thread;
+     std::mutex mutex;
+     std::condition_variable changed;
++    bool stopping = false;
+     std::vector<PTR(OSTimer)> active;
+ } timer_context;
+
+@@ -81,7 +82,7 @@
+     ultramodern::set_native_thread_priority(ultramodern::ThreadPriority::VeryHigh);
+
+     std::unique_lock lock{ timer_context.mutex };
+-    while (true) {
++    while (!timer_context.stopping) {
+         // If there's no timer to act on, wait for one.
+         if (timer_context.active.empty()) {
+             timer_context.changed.wait(lock);
+@@ -121,7 +122,18 @@
+
+ void ultramodern::init_timers(RDRAM_ARG1) {
+     timer_context.thread = std::thread{ timer_thread, PASS_RDRAM1 };
+-    timer_context.thread.detach();
++}
++
++void ultramodern::join_timer_thread() {
++    {
++        std::lock_guard lock{ timer_context.mutex };
++        timer_context.stopping = true;
++    }
++    // Wake both an idle timer thread and one waiting for a distant deadline.
++    timer_context.changed.notify_all();
++    if (timer_context.thread.joinable()) {
++        timer_context.thread.join();
++    }
+ }
+
+ uint32_t ultramodern::get_speed_multiplier() {
+--- a/ultramodern/include/ultramodern/ultramodern.hpp
++++ b/ultramodern/include/ultramodern/ultramodern.hpp
+@@ -169,6 +169,7 @@
+
+ bool is_game_started();
+ void quit();
++void join_timer_thread();
+ void join_event_threads();
+ void join_thread_cleaner_thread();
+ void join_saving_thread();
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -1014,6 +1014,8 @@
+     graphics_shutdown_ready.signal();
+
+     game_thread.join();
++    // Timers reference RDRAM and their condition variable must outlive the worker.
++    ultramodern::join_timer_thread();
+     ultramodern::join_event_threads();
+     ultramodern::join_thread_cleaner_thread();
+     ultramodern::join_saving_thread();

@@ -443,7 +443,7 @@ namespace {
             "<br /><br />While hanging:"
             "<br /><recomp-color primary>A</recomp-color>: climb up."
             "<br /><recomp-color primary>Push toward the edge</recomp-color>: hop up."
-            "<br /><recomp-color primary>Push away</recomp-color>: let go.",
+            "<br />Press <recomp-color primary>B</recomp-color> or <recomp-color primary>push away</recomp-color>: let go.",
             false, &ledge_grab_on);
         add_bool("longer_tail_spin", "Longer Tail Spin",
             "Conker's <recomp-color primary>tail spin</recomp-color> (press A again in the air) floats higher and glides down more slowly, so he "

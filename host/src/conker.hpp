@@ -164,6 +164,8 @@ namespace conker {
         void update();        // main thread (update_gfx): the Autosave Icon
         void on_vi();         // every VI: Pause When Unfocused holds the game here
         void set_player_buttons(uint16_t buttons); // player 1's own buttons (Skip Any Cutscene's hold)
+        // Player 1 after scripted input, camera/photo filtering and intro input; before walk/toggles/skip presses.
+        uint16_t get_player_buttons();
         uint16_t apply_toggles(uint16_t buttons); // player 1's buttons: Toggle R-Look / Crouch
         uint16_t apply_skip_press(uint16_t buttons); // player 1's buttons: Hold to Skip's press in the game over
         void apply_walk(uint16_t buttons, float* x, float* y); // player 1's stick: Walk Button
