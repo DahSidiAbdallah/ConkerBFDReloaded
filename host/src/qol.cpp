@@ -533,6 +533,8 @@ namespace {
     // "skip?" check (a player's video: a tap there, him walking once the level showed).
     constexpr double walk_after_cutscene_seconds = 1.0;
     bool walk_toggled = false;
+    std::atomic<bool> walk_debug_walking{ false }, walk_debug_on_foot{ false };
+    std::atomic<float> walk_debug_push{ 0.0f };
     bool walk_l_was_held = false;
     int64_t walk_l_pressed = 0;     // when L went down
     bool walk_l_in_cutscene = false; // a cutscene played while L was down (Skip Any Cutscene's hold)
@@ -561,6 +563,7 @@ namespace {
     bool on_foot_animation(uint16_t animation) {
         switch (animation) {
             case 0x0F: case 0x49: // standing
+            case 0x00:            // walking slowly (the Walk Button's push: on straw, planks; issue #38)
             case 0x01: case 0x02: // walking, running
             case 0x21: case 0x36: // turning, landing
             case 0x7A:            // pressed against a wall
@@ -587,9 +590,9 @@ static void update_on_foot(uint8_t* rdram) {
     constexpr int32_t player = (int32_t)0x800CC2D0;
     const uint8_t flags = (uint8_t)((uint32_t)MEM_W(0, (gpr)(player + 0x100)) >> 24);
     const uint16_t animation = (uint16_t)((uint32_t)MEM_W(0, (gpr)(player + 0x84)) >> 16);
-    // A few frames off his feet are let through: walking slowly over uneven ground (the straw on the barn roof)
-    // he leaves it, or changes animation, for a frame now and then, and the walk let go of the stick each time,
-    // so he ran for a frame and stuttered (issue #38). Off his feet longer (a jump, swimming), the stick is his.
+    // A few frames off his feet are let through, so a frame now and then in an animation the list above lacks
+    // doesn't let go of the stick. (The walk let go every few frames walking slowly on the barn's straw, whose
+    // animation, 0x00, wasn't listed: he lurched into a full walk each time and stuttered, issue #38.)
     constexpr int off_foot_frames_allowed = 8; // VIs, about an eighth of a second
     static int off_foot_frames = off_foot_frames_allowed;
     if (flags == 0x01 && on_foot_animation(animation)) {
@@ -691,6 +694,8 @@ void conker::qol::apply_walk(uint16_t buttons, float* x, float* y) {
         walk_toggled = false;
     }
     const bool walking = (mode == 1) ? l_held : walk_toggled;
+    walk_debug_walking = walking;
+    walk_debug_on_foot = on_foot.load();
     if (walking && on_foot.load()) {
         // Pushed diagonally, a controller reports up to about 1.4 (both axes at their ends), which
         // turned down was still enough for the game to run: the push is capped at a full one first.
@@ -699,6 +704,14 @@ void conker::qol::apply_walk(uint16_t buttons, float* x, float* y) {
         *x *= scale;
         *y *= scale;
     }
+    walk_debug_push = std::sqrt(*x * *x + *y * *y);
+}
+
+// Testing (F9's history, free_camera.cpp): the walk's state as last applied.
+void conker::qol::walk_debug(bool* walking, bool* foot, float* push) {
+    *walking = walk_debug_walking;
+    *foot = walk_debug_on_foot;
+    *push = walk_debug_push;
 }
 
 // Skip Any Cutscene: where func_1501E05C returns ($v0: skip the playing cutscene now). It runs each

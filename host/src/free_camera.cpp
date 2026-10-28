@@ -891,6 +891,7 @@ namespace {
     struct HistoryFrame {
         double t; bool engaged; float placed, collided, shown, reach, held; int held_frames; float yaw, pitch;
         uint16_t anim;
+        uint8_t ground; bool walking, foot; float push; // the Walk Button's state (issue #38)
     };
     constexpr int history_size = 300;
     HistoryFrame history[history_size] = {};
@@ -901,12 +902,12 @@ namespace {
 void conker::free_camera_write_history(const std::filesystem::path& path) {
     std::lock_guard lock(history_mutex);
     if (FILE* f = std::fopen(path.string().c_str(), "w")) {
-        std::fprintf(f, "time engaged placed collided shown reach held held_frames yaw pitch anim\n");
+        std::fprintf(f, "time engaged placed collided shown reach held held_frames yaw pitch anim ground walking foot push\n");
         for (int k = 0; k < history_size; k++) {
             const HistoryFrame& h = history[(history_next + k) % history_size];
             if (h.t == 0.0) continue;
-            std::fprintf(f, "%.3f %d %.1f %.1f %.1f %.1f %.1f %d %.1f %.1f %04X\n", h.t, (int)h.engaged, h.placed, h.collided, h.shown, h.reach,
-                h.held, h.held_frames, h.yaw * 57.2958f, h.pitch * 57.2958f, h.anim);
+            std::fprintf(f, "%.3f %d %.1f %.1f %.1f %.1f %.1f %d %.1f %.1f %04X %02X %d %d %.2f\n", h.t, (int)h.engaged, h.placed, h.collided, h.shown, h.reach,
+                h.held, h.held_frames, h.yaw * 57.2958f, h.pitch * 57.2958f, h.anim, h.ground, (int)h.walking, (int)h.foot, h.push);
         }
         std::fclose(f);
     }
@@ -928,7 +929,9 @@ extern "C" void conker_mouse_camera_view(uint8_t* rdram, recomp_context* ctx) {
         std::lock_guard lock(history_mutex);
         history[history_next] = { conker::testing::game_seconds(), orbit.engaged, std::sqrt(placed), std::sqrt(collided), orbit.shown_distance,
             orbit.reach, orbit.held, orbit.held_frames, orbit.yaw, orbit.pitch,
-            (uint16_t)((uint32_t)MEM_W(0, (gpr)(int32_t)(player_object + 0x84)) >> 16) };
+            (uint16_t)((uint32_t)MEM_W(0, (gpr)(int32_t)(player_object + 0x84)) >> 16),
+            (uint8_t)((uint32_t)MEM_W(0, (gpr)(int32_t)(player_object + 0x100)) >> 24) };
+        conker::qol::walk_debug(&history[history_next].walking, &history[history_next].foot, &history[history_next].push);
         history_next = (history_next + 1) % history_size;
     }
     if (!orbit.engaged || (uint32_t)camera != (uint32_t)MEM_W(0, (gpr)(int32_t)current_camera)) {
