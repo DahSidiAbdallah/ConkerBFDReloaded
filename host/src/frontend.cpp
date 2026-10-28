@@ -1,7 +1,7 @@
 // The window, the launcher and menus (RecompFrontend's recompui) and remappable
 // input (recompinput). Launcher design: a full-screen collage of the game's moments with the game's logo
 // over the middle, put together as the launcher opens (assets/poster, add_posters), and the menu on the
-// right, in orange and cream.
+// right, in the game menus' own pill rings.
 
 #include <algorithm>
 #include <array>
@@ -219,8 +219,8 @@ namespace {
     float ease_out_back(float t) { const float c = 1.7f, u = t - 1.0f; return 1.0f + (c + 1.0f) * u * u * u + c * u * u; }
 
     // The launcher's buttons in the game's own menu style (the pause and save menus' pill rings): each
-    // option's words are a picture (assets/menu, made by tools/launcher_art/make_buttons.py), lit (an
-    // orange-red ring) while pointed at or selected, a dark steel ring otherwise. The option's own text is
+    // option's words are a picture (assets/menu, made by tools/launcher_art/make_buttons.py), lit (the
+    // ring glowing green inside, the letters glowing) while pointed at or selected, the plain steel ring otherwise. The option's own text is
     // hidden but kept, so it still works the same way.
     struct MenuButton {
         recompui::GameOption* option = nullptr;
@@ -532,6 +532,16 @@ namespace {
             recompui::queue_image_from_bytes_file("?/conker/settings_bg", bytes);
             recompui::config::set_backdrop("?/conker/settings_bg");
         }
+        // The game's menu pill ring, plain and lit, in parts (RecompFrontend's ui_conker_look.h draws the settings'
+        // choices, tabs and buttons with them; tools/launcher_art/game_rings.py).
+        for (const char* part : { "on_l", "on_c", "on_r", "off_l", "off_c", "off_r" }) {
+            const std::string name = std::string("ring_") + part;
+            std::ifstream ring(recompui::file::get_asset_path(("menu/" + name + ".png").c_str()), std::ios::binary);
+            std::vector<char> ring_bytes((std::istreambuf_iterator<char>(ring)), std::istreambuf_iterator<char>());
+            if (!ring_bytes.empty()) {
+                recompui::queue_image_from_bytes_file("?/conker/" + name, ring_bytes);
+            }
+        }
         // Launcher Poster's pictures, for its description (settings.cpp launcher_poster_about).
         for (size_t i = 0; i < std::size(poster_folders); i++) {
             const std::string name = "poster_preview_" + std::to_string(i);
@@ -543,19 +553,19 @@ namespace {
         }
     }
 
-    // Conker's menu colours for the launcher and every menu (recompui's default is blue): orange-red for
+    // Conker's menu colours for the launcher and every menu (recompui's default is blue): the game menus' green for
     // what is chosen, gold letters (the settings' own pieces: RecompFrontend's ui_conker_look.h).
     void apply_theme() {
         using recompui::theme::color;
         auto set = recompui::theme::set_theme_color;
-        set(color::Primary, { 0xEE, 0x4E, 0x14, 0xFF });
-        set(color::PrimaryL, { 0xFF, 0x93, 0x2B, 0xFF });
-        set(color::PrimaryD, { 0xA8, 0x30, 0x08, 0xFF });
-        set(color::PrimaryA5, { 0xEE, 0x4E, 0x14, 0x0D });
-        set(color::PrimaryA20, { 0xEE, 0x4E, 0x14, 0x33 });
-        set(color::PrimaryA30, { 0xEE, 0x4E, 0x14, 0x4D });
-        set(color::PrimaryA50, { 0xEE, 0x4E, 0x14, 0x80 });
-        set(color::PrimaryA80, { 0xEE, 0x4E, 0x14, 0xCC });
+        set(color::Primary, { 0x3C, 0xA0, 0x1E, 0xFF });
+        set(color::PrimaryL, { 0x78, 0xDC, 0x3C, 0xFF });
+        set(color::PrimaryD, { 0x1E, 0x6E, 0x0A, 0xFF });
+        set(color::PrimaryA5, { 0x3C, 0xA0, 0x1E, 0x0D });
+        set(color::PrimaryA20, { 0x3C, 0xA0, 0x1E, 0x33 });
+        set(color::PrimaryA30, { 0x3C, 0xA0, 0x1E, 0x4D });
+        set(color::PrimaryA50, { 0x3C, 0xA0, 0x1E, 0x80 });
+        set(color::PrimaryA80, { 0x3C, 0xA0, 0x1E, 0xCC });
         set(color::TextActive, cream);
         set(color::Text, { 0xF0, 0xD4, 0x8A, 0xFF });
         set(color::TextA5, { 0xF0, 0xD4, 0x8A, 0x0D });
@@ -564,7 +574,7 @@ namespace {
         set(color::TextA50, { 0xF0, 0xD4, 0x8A, 0x80 });
         set(color::TextA80, { 0xF0, 0xD4, 0x8A, 0xCC });
         set(color::TextDim, { 0xC9, 0xAE, 0x6E, 0xFF });
-        set(color::Elevated, { 0xF0, 0x7A, 0x1E, 0x38 });
+        set(color::Elevated, { 0x5A, 0xC8, 0x32, 0x30 });
         set(color::Background1, { 0x0B, 0x06, 0x04, 0xFF });
     }
 

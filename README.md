@@ -226,7 +226,7 @@ Made by **dahmedvall95**, built on the work of:
 * [N64Recomp, N64ModernRuntime and RecompFrontend](https://github.com/N64Recomp) by Wiseguy and contributors.
 * [RT64](https://github.com/rt64/rt64) by Darío and contributors, the renderer.
 * [GameBeast92's 4K Ultimate Texture Pack](https://github.com/GameBeast92/Conker-s-Bad-Fur-Day-4k-Ultimate-Texture-Pack)
-  (CC BY 4.0), behind the HD Icons pack.
+  (CC BY 4.0), behind the HD Icons pack and the menus' pill buttons (modified).
 * **Corrigo** and **Djipi** ([emulation64.fr](http://www.emulation64.fr/)) for the French translation, used with
   permission.
 * The [Conker Wiki](https://conker.fandom.com/) for some of the N64 screenshots in the launcher's posters.

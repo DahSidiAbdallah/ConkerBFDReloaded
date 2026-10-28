@@ -2,8 +2,14 @@
   Conker's look for the settings (RecompFrontend's ui_conker_look.h adds these classes): dark edges
   around the letters, the page titles' gold rim. (No box-shadow: the renderer draws it in the wrong place.)
 */
+/* The game's own menu pill (its HD texture, tools/launcher_art/game_rings.py, set by RecompFrontend's ui_conker_look.h):
+   the plain steel ring, and while chosen, pointed at or focused, the lit one with the letters glowing, as in the game's
+   save and pause menus. Nothing fills it. */
 .conker-pill {
-    font-effect: outline(1.5dp #120c08);
+    font-effect: outline(1.5dp #081908);
+}
+.conker-pill.state-checked, .conker-pill.state-hover, .conker-pill.state-focus {
+    font-effect: glow(1dp 6dp 0dp 0dp #6cff2c), outline(1.5dp #0f3c0a);
 }
 .conker-name {
     font-effect: outline(2dp #1e1408), shadow(1dp 2dp #000000);
