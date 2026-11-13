@@ -405,11 +405,11 @@ namespace {
         if (conker::testing::right_stick(x, y)) {
             return;
         }
-        using recompinput::InputField;
-        *x = shape(recompinput::get_input_analog(0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, true)) -
-            recompinput::get_input_analog(0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, false)));
-        *y = shape(recompinput::get_input_analog(0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false)) -
-            recompinput::get_input_analog(0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true)));
+        // Player 1's own controller (free_camera.cpp): not every controller's.
+        float sx = 0.0f, sy = 0.0f;
+        conker::player_right_stick(0, &sx, &sy);
+        *x = shape(sx);
+        *y = shape(sy);
     }
 
     // Conker, or something that hangs off him (his gun, what he holds).
