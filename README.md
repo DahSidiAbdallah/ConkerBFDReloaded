@@ -200,6 +200,8 @@ Found something else? Please [open an issue](../../issues) with what you were do
 Ideas go on the [Discussions](../../discussions) board.
 
 ## Building
+
+Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md).
 You need the ROM in this folder as `conker.z64`, the [mkst/conker](https://github.com/mkst/conker) decompilation
 (commit `3adf229`) built into `conker/`, and [N64Recomp](https://github.com/N64Recomp/N64Recomp) (commit `ffb39cd`,
 with `patches/n64recomp.patch` then `patches/n64recomp_conker.patch` applied) built into `N64Recomp/`.
