@@ -554,6 +554,7 @@ extern "C" void conker_look_yaw_from_facing_scaled(uint8_t* rdram, recomp_contex
 
 // Before the pitch clamp: $s0 is the look state, $t0 the targets (reloaded at 0x15120B40).
 extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
+    conker::free_camera_look_mode(rdram, ctx->r16); // the Free Camera leaves this camera to the look mode
     frame = Frame{};
     const float units_per_degree = aim_units_per_degree;
     aim_units_per_degree = 0.0f;
@@ -646,6 +647,7 @@ extern "C" void conker_look_targets(uint8_t* rdram, recomp_context* ctx) {
 
 // After the springs: $s0 is the look state, $t0 the targets (reloaded at 0x15120E28 or 0x15120E88).
 extern "C" void conker_look_currents(uint8_t* rdram, recomp_context* ctx) {
+    conker::free_camera_look_mode(rdram, ctx->r16); // the Free Camera leaves this camera to the look mode
 #if defined(CONKER_RT64)
     const gpr state = ctx->r16, targets = ctx->r8;
     // From CBFD-Recompiled V0.1.6 (MIT): with Swap Sticks, the view's yaw is the aim's: walking back and to the side

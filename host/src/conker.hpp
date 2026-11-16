@@ -103,8 +103,13 @@ namespace conker {
     void key_prompts_update(); // now and then, from the UI thread
     void key_prompts_write_pictures(const std::filesystem::path& dir); // testing
     bool keyboard_prompts_in_use(); // the prompts show keys and mouse buttons now (else the controller's)
-    // free_camera.cpp: the right stick for the Free Camera (x right, y up, past the dead zone).
-    void free_camera_stick(float* x, float* y);
+    // free_camera.cpp: a player's (0-3) right stick for the Free Camera (x right, y up, past the dead zone), from
+    // that player's own controller.
+    void free_camera_stick(int player, float* x, float* y);
+    // free_camera.cpp: a player's (0-3) right stick as it is (x right, y up, -1 to 1), from their own controller.
+    void player_right_stick(int player, float* x, float* y);
+    // free_camera.cpp: the look mode (hold R, aiming) runs for this camera this frame (look_aim.cpp's hooks, $s0).
+    void free_camera_look_mode(uint8_t* rdram, uint64_t camera);
     // free_camera.cpp: testing (F9 with capture_enabled): the free camera's last frames, as text.
     void free_camera_write_history(const std::filesystem::path& path);
     // scene_fixes.cpp: the last room changes and button presses (an F9 capture writes them, events_<n>.txt), to

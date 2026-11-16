@@ -782,9 +782,10 @@ namespace {
         // The Free Camera steers with the right stick: while it's pushed, it doesn't also press
         // the C-buttons it's bound to (C-Left/C-Right would hand the camera back to the game).
         // (Not while Aiming: Swap Sticks has the right stick aiming: the C-buttons then come from the left stick.)
-        if (controller == 0 && !conker::look_aim::swap_sticks_now(0)) {
+        // Each player's own stick, for their own camera (free_camera.cpp).
+        if (controller >= 0 && controller < 4 && !conker::look_aim::swap_sticks_now(controller)) {
             float cx = 0.0f, cy = 0.0f;
-            conker::free_camera_stick(&cx, &cy);
+            conker::free_camera_stick(controller, &cx, &cy);
             constexpr uint16_t c_right = 0x0001, c_left = 0x0002, c_down = 0x0004, c_up = 0x0008;
             if (cx != 0.0f) *buttons &= (uint16_t)~(c_left | c_right);
             if (cy != 0.0f) *buttons &= (uint16_t)~(c_up | c_down);
