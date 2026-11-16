@@ -133,6 +133,8 @@ off while you play.
 #### Controllers and Multiplayer
 Built-in support for N64 controllers and adapters (raphnet, Mayflash, Hyperkin, the Switch Online N64 controller,
 the 8BitDo 64), rumble, and several controllers for multiplayer.
+For the measured transparent-red generic N64 USB pad, see the
+[optional Windows profile and setup](docs/generic-n64-windows.md).
 
 #### Linux and Steam Deck
 A Linux build is in every release. On the Steam Deck, extract it in desktop mode, right-click
